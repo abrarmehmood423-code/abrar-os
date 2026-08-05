@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, Download, LockKeyhole, RotateCcw, Settings, ShieldCheck, Upload } from "lucide-react";
+import CloudBackups from "@/components/cloud-backups";
 import {
   AppSettings,
   clearAllData,
@@ -87,7 +88,7 @@ export default function SettingsCentre() {
     clearAllData();
     sessionStorage.removeItem(SESSION_UNLOCKED_KEY);
     setSettings(defaultSettings);
-    setMessage("All local Abrar OS data has been deleted.");
+    setMessage("All local Abrar OS data has been deleted. Signed-in cloud data and restore points were not deleted.");
   }
 
   return (
@@ -127,22 +128,24 @@ export default function SettingsCentre() {
 
         <div className="grid two section-gap">
           <section className="card">
-            <div className="card-head"><h2>Backup and restore</h2><Download size={20}/></div>
-            <p className="muted">Exports all locally stored Abrar OS modules into one JSON backup. The backup can contain sensitive health, financial and immigration information.</p>
+            <div className="card-head"><h2>Download and restore</h2><Download size={20}/></div>
+            <p className="muted">Exports all locally stored Abrar OS modules into one JSON backup. The file can contain sensitive health, financial and immigration information.</p>
             <div className="quick-grid">
               <button className="quick" onClick={downloadBackup}><Download size={16}/> Download backup</button>
               <label className="quick" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7,cursor:"pointer"}}><Upload size={16}/> Restore backup<input type="file" accept="application/json,.json" onChange={restoreBackup} hidden/></label>
             </div>
-            <p className="muted">Last backup: {settings.lastBackupAt ? new Date(settings.lastBackupAt).toLocaleString("en-GB") : "No backup recorded"}</p>
+            <p className="muted">Last downloaded backup: {settings.lastBackupAt ? new Date(settings.lastBackupAt).toLocaleString("en-GB") : "No backup recorded"}</p>
           </section>
 
           <section className="card">
-            <div className="card-head"><h2>Local data status</h2><ShieldCheck size={20}/></div>
-            <p className="muted">This version stores information in this browser. Clearing site data, changing browser profiles or losing the device can remove records unless you have a backup.</p>
-            <span className="pill warning">Not yet cloud-synchronised</span>
-            <div className="section-gap"><button className="primary-button" style={{background:"#b42318"}} onClick={resetEverything}><RotateCcw size={16}/> Delete all local data</button></div>
+            <div className="card-head"><h2>Data protection status</h2><ShieldCheck size={20}/></div>
+            <p className="muted">Abrar OS keeps an offline copy in this browser and synchronises the signed-in account with Firestore. Clearing this browser does not remove signed-in cloud data.</p>
+            <div className="inline-pills"><span className="pill success">Local offline copy</span><span className="pill success">Cloud sync enabled</span></div>
+            <div className="section-gap"><button className="primary-button" style={{background:"#b42318"}} onClick={resetEverything}><RotateCcw size={16}/> Delete local browser data</button></div>
           </section>
         </div>
+
+        <div className="section-gap"><CloudBackups /></div>
       </main>
     </div>
   );
