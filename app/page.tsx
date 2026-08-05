@@ -8,6 +8,7 @@ const moduleLinks = [
   { href: "/cars", label: "Cars", color: "#b54708" },
   { href: "/work", label: "Work & Study", color: "#344054" },
   { href: "/life", label: "Life Hub", color: "#c11574" },
+  { href: "/settings", label: "Settings", color: "#475467" },
 ];
 
 export default function HomePage() {
