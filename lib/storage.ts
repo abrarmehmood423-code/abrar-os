@@ -3,8 +3,14 @@ import { auth, db } from "./firebase";
 import type { AppData, Bill, Task } from "./types";
 
 const STORAGE_KEY = "abrar-os-data-v1";
+const STORAGE_UPDATED_KEY = "abrar-os-data-updated-at";
 const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString();
+
+export type DataSnapshot = {
+  data: AppData;
+  updatedAt: string;
+};
 
 export const starterData: AppData = {
   tasks: [{ id:"starter-review", title:"Review today’s priorities", date:today(), time:"09:00", category:"Personal", priority:"High", status:"open", recurrence:"Daily", reminderMinutes:15, createdAt:now() }],
@@ -38,47 +44,57 @@ function migrate(value: Partial<AppData>): AppData {
   };
 }
 
-export function loadData(): AppData {
-  if (typeof window === "undefined") return starterData;
+export function loadLocalSnapshot(): DataSnapshot {
+  if (typeof window === "undefined") return { data: starterData, updatedAt: "" };
   try {
     const value = window.localStorage.getItem(STORAGE_KEY);
-    return value ? migrate(JSON.parse(value) as Partial<AppData>) : starterData;
+    const updatedAt = window.localStorage.getItem(STORAGE_UPDATED_KEY) ?? "";
+    return { data: value ? migrate(JSON.parse(value) as Partial<AppData>) : starterData, updatedAt };
   } catch {
-    return starterData;
+    return { data: starterData, updatedAt: "" };
   }
 }
 
-export async function loadCloudData(): Promise<AppData | null> {
+export function loadData(): AppData {
+  return loadLocalSnapshot().data;
+}
+
+export function saveLocalData(data: AppData, updatedAt = new Date().toISOString()): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  window.localStorage.setItem(STORAGE_UPDATED_KEY, updatedAt);
+}
+
+export async function loadCloudSnapshot(): Promise<DataSnapshot | null> {
   const user = auth?.currentUser;
   if (!user || !db) return null;
 
   try {
     const snapshot = await getDoc(doc(db, "users", user.uid, "appData", "main"));
     if (!snapshot.exists()) return null;
-    return migrate(snapshot.data() as Partial<AppData>);
+    const raw = snapshot.data() as Partial<AppData> & { updatedAt?: string };
+    return { data: migrate(raw), updatedAt: raw.updatedAt ?? "" };
   } catch (error) {
     console.error("Unable to load Abrar OS cloud data", error);
     return null;
   }
 }
 
-export function saveData(data: AppData): void {
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }
-
+export async function saveCloudData(data: AppData, updatedAt = new Date().toISOString()): Promise<void> {
   const user = auth?.currentUser;
   if (!user || !db) return;
 
-  void setDoc(
+  await setDoc(
     doc(db, "users", user.uid, "appData", "main"),
-    {
-      ...data,
-      ownerUid: user.uid,
-      updatedAt: new Date().toISOString()
-    },
+    { ...data, ownerUid: user.uid, updatedAt },
     { merge: true }
-  ).catch((error) => {
+  );
+}
+
+export function saveData(data: AppData): void {
+  const updatedAt = new Date().toISOString();
+  saveLocalData(data, updatedAt);
+  void saveCloudData(data, updatedAt).catch((error) => {
     console.error("Unable to save Abrar OS cloud data", error);
   });
 }
