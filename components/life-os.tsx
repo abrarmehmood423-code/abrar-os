@@ -1,174 +1,73 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import {
-  Bell,
-  CalendarDays,
-  Check,
-  CircleDollarSign,
-  HeartPulse,
-  Home,
-  Inbox,
-  LayoutDashboard,
-  ListTodo,
-  Plus,
-  Repeat2,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
-import { createId, loadData, nextRecurringDate, saveData } from "@/lib/storage";
-import type { AppData, Priority, Recurrence, Responsibility, Task } from "@/lib/types";
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { Bell, CalendarDays, Check, CircleDollarSign, Home, Inbox, LayoutDashboard, ListTodo, Plus, Repeat2, ShieldCheck, Trash2, WalletCards } from "lucide-react";
+import { advanceBillDate, createId, loadData, nextRecurringDate, saveData } from "@/lib/storage";
+import type { Account, AppData, Bill, BillFrequency, Debt, DebtStatus, Priority, Recurrence, Responsibility, Task, TransactionKind } from "@/lib/types";
 
 type View = "today" | "schedule" | "add" | "money" | "life";
 type AddMode = "task" | "responsibility";
+type MoneyTab = "overview" | "accounts" | "transactions" | "bills" | "debts";
 
-const categories = ["Personal", "Family", "Health", "Money", "Immigration", "AAA Work", "Embrace", "Education", "Car", "Other"];
-const recurrenceOptions: Recurrence[] = ["None", "Daily", "Weekly", "Monthly", "Yearly"];
+const categories = ["Personal","Family","Health","Money","Immigration","AAA Work","Embrace","Education","Car","Other"];
+const todayIso = () => new Date().toISOString().slice(0,10);
+const money = (n:number) => new Intl.NumberFormat("en-GB",{style:"currency",currency:"GBP"}).format(n||0);
+const formatDate = (v:string) => v ? new Intl.DateTimeFormat("en-GB",{day:"numeric",month:"short",year:"numeric"}).format(new Date(`${v}T12:00:00`)) : "Not set";
+const priorityClass = (p:Priority) => p === "Critical" ? "danger" : p === "High" ? "warning" : "";
+const responsibilityNextDate=(f:string)=>{const d=new Date();const x=f.toLowerCase();if(x.includes("daily"))d.setDate(d.getDate()+1);else if(x.includes("weekly"))d.setDate(d.getDate()+7);else if(x.includes("year"))d.setFullYear(d.getFullYear()+1);else d.setMonth(d.getMonth()+1);return d.toISOString().slice(0,10)};
 
-function todayIso() { return new Date().toISOString().slice(0, 10); }
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00`));
-}
-function priorityClass(priority: Priority) { return priority === "Critical" ? "danger" : priority === "High" ? "warning" : ""; }
-function isOverdue(date: string) { return date < todayIso(); }
-
-export default function LifeOS() {
-  const [view, setView] = useState<View>("today");
-  const [addMode, setAddMode] = useState<AddMode>("task");
-  const [data, setData] = useState<AppData | null>(null);
-  const [command, setCommand] = useState("");
-  const [notifications, setNotifications] = useState<NotificationPermission | "unsupported">("default");
-
-  useEffect(() => {
-    setData(loadData());
-    setNotifications("Notification" in window ? Notification.permission : "unsupported");
-  }, []);
-  useEffect(() => { if (data) saveData(data); }, [data]);
-
-  const todayTasks = useMemo(() => (data?.tasks ?? []).filter((task) => task.date === todayIso() && task.status === "open").sort((a,b)=>(a.time??"23:59").localeCompare(b.time??"23:59")), [data]);
-  const upcomingTasks = useMemo(() => (data?.tasks ?? []).filter((task) => task.status === "open").sort((a,b)=>`${a.date}${a.time??""}`.localeCompare(`${b.date}${b.time??""}`)), [data]);
-  const overdueTasks = useMemo(() => upcomingTasks.filter((task) => isOverdue(task.date)), [upcomingTasks]);
-  const dueResponsibilities = useMemo(() => (data?.responsibilities ?? []).filter((item) => item.active && item.nextDate <= todayIso()), [data]);
-
-  if (!data) return <main className="loading-screen">Loading Abrar OS…</main>;
-
-  function addTask(task: Omit<Task, "id" | "createdAt" | "status">) {
-    setData((current) => current ? { ...current, tasks: [...current.tasks, { ...task, id: createId(), status: "open", createdAt: new Date().toISOString() }] } : current);
-  }
-  function addResponsibility(item: Omit<Responsibility, "id" | "createdAt" | "active">) {
-    setData((current) => current ? { ...current, responsibilities: [...current.responsibilities, { ...item, id: createId(), active: true, createdAt: new Date().toISOString() }] } : current);
-  }
-  function completeTask(id: string) {
-    setData((current) => {
-      if (!current) return current;
-      const original = current.tasks.find((task) => task.id === id);
-      if (!original) return current;
-      const completed = current.tasks.map((task) => task.id === id ? { ...task, status: "done" as const, completedAt: new Date().toISOString() } : task);
-      if (original.recurrence === "None") return { ...current, tasks: completed };
-      const next: Task = { ...original, id: createId(), date: nextRecurringDate(original.date, original.recurrence), status: "open", createdAt: new Date().toISOString(), completedAt: undefined };
-      return { ...current, tasks: [...completed, next] };
-    });
-  }
-  function deleteTask(id: string) { setData((current) => current ? { ...current, tasks: current.tasks.filter((task) => task.id !== id) } : current); }
-  function completeResponsibility(id: string) {
-    setData((current) => current ? { ...current, responsibilities: current.responsibilities.map((item) => item.id === id ? { ...item, nextDate: responsibilityNextDate(item.frequency), nextAction: item.nextAction || "Review next action" } : item) } : current);
-  }
-  function deleteResponsibility(id: string) { setData((current) => current ? { ...current, responsibilities: current.responsibilities.filter((item) => item.id !== id) } : current); }
-  function saveBrainDump(text: string) {
-    const clean = text.trim(); if (!clean) return;
-    setData((current) => current ? { ...current, brainDump: [{ id: createId(), text: clean, createdAt: new Date().toISOString() }, ...current.brainDump] } : current);
-  }
-  function submitCommand(event: FormEvent) { event.preventDefault(); if (!command.trim()) return; saveBrainDump(command); setCommand(""); setView("life"); }
-  async function enableNotifications() {
-    if (!("Notification" in window)) return setNotifications("unsupported");
-    const permission = await Notification.requestPermission();
-    setNotifications(permission);
-    if (permission === "granted") new Notification("Abrar OS reminders enabled", { body: "Browser reminders are ready. Keep native alarms for transplant medicines." });
-  }
-
-  const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
-
-  return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="brand"><h1>Abrar OS</h1><p>{dateLabel}</p></div>
-        <button className="notification-button" onClick={enableNotifications}><Bell size={17} />{notifications === "granted" ? "Reminders on" : "Enable reminders"}</button>
-      </header>
-
-      <main className="main">
-        {view === "today" && <>
-          <section className="card">
-            <div className="card-head"><div><span className="pill success">Life command centre</span><h2 className="top-title">Put it out of your mind</h2><p className="muted top-copy">Capture anything immediately. It stays in your private inbox.</p></div><Inbox size={24}/></div>
-            <form onSubmit={submitCommand} className="command-row"><input className="command" value={command} onChange={(e)=>setCommand(e.target.value)} placeholder="Example: Chase employer tomorrow about working hours"/><button className="primary-button">Save</button></form>
-            <div className="quick-grid"><button className="quick" onClick={()=>{setAddMode("task");setView("add")}}>Add task</button><button className="quick" onClick={()=>{setAddMode("responsibility");setView("add")}}>Add responsibility</button><button className="quick" onClick={()=>setView("schedule")}>Open schedule</button><button className="quick" onClick={()=>setView("life")}>Brain dump</button></div>
-          </section>
-
-          <section className="hero section-gap">
-            <article className="card"><div className="card-head"><h2>Needs attention</h2><span className={`pill ${(overdueTasks.length+dueResponsibilities.length)?"warning":"success"}`}>{overdueTasks.length+dueResponsibilities.length ? `${overdueTasks.length+dueResponsibilities.length} urgent` : "Clear"}</span></div>
-              {overdueTasks.length===0 && dueResponsibilities.length===0 ? <p className="muted">No overdue tasks or responsibilities.</p> : <div className="list">
-                {overdueTasks.map((task)=><div className="item" key={task.id}><div><strong>{task.title}</strong><span>Overdue since {formatDate(task.date)}</span></div><span className="pill danger small-pill">Task</span></div>)}
-                {dueResponsibilities.map((item)=><div className="item" key={item.id}><div><strong>{item.title}</strong><span>{item.nextAction} • due {formatDate(item.nextDate)}</span></div><span className="pill warning small-pill">Responsibility</span></div>)}
-              </div>}
-            </article>
-            <article className="card"><h2>Responsibility health</h2><div className="stat">{data.responsibilities.filter((x)=>x.active).length}</div><p className="muted">Active life areas being tracked.</p><span className={`pill ${dueResponsibilities.length?"warning":"success"}`}>{dueResponsibilities.length ? `${dueResponsibilities.length} need action` : "Up to date"}</span></article>
-          </section>
-
-          <section className="grid three section-gap">
-            <article className="card"><div className="card-head"><h2>Today’s tasks</h2><ListTodo size={19}/></div><TaskList tasks={todayTasks.slice(0,4)} onComplete={completeTask} onDelete={deleteTask} empty="Nothing scheduled today."/></article>
-            <article className="card"><div className="card-head"><h2>Recurring tasks</h2><Repeat2 size={19}/></div><div className="stat">{data.tasks.filter((x)=>x.status==="open"&&x.recurrence!=="None").length}</div><p className="muted">A new occurrence is created when you complete one.</p></article>
-            <article className="card"><div className="card-head"><h2>Brain dump</h2><Inbox size={19}/></div><div className="stat">{data.brainDump.length}</div><p className="muted">Thoughts safely captured.</p><button className="text-button" onClick={()=>setView("life")}>Review inbox</button></article>
-          </section>
-        </>}
-
-        {view === "schedule" && <section className="card"><div className="card-head"><h2>Schedule</h2><CalendarDays size={20}/></div><TaskList tasks={upcomingTasks} onComplete={completeTask} onDelete={deleteTask} showDate empty="No upcoming tasks."/></section>}
-
-        {view === "add" && <>{addMode === "task" ? <TaskForm onSave={(task)=>{addTask(task);setView("today")}}/> : <ResponsibilityForm onSave={(item)=>{addResponsibility(item);setView("life")}}/>}</>}
-
-        {view === "money" && <section className="card"><div className="card-head"><h2>Money</h2><CircleDollarSign size={20}/></div><div className="empty-state"><strong>Finance module comes next</strong><p className="muted">Accounts, income, direct debits, debts and safe balance will be added here.</p></div></section>}
-
-        {view === "life" && <div className="grid two">
-          <section className="card"><div className="card-head"><h2>Responsibilities</h2><ShieldCheck size={20}/></div>{data.responsibilities.length===0?<p className="muted">No responsibilities added.</p>:<div className="list">{data.responsibilities.map((item)=><div className="item" key={item.id}><div className="task-content"><strong>{item.title}</strong><span>{item.area} • {item.owner} • {item.frequency}</span><span>Next: {item.nextAction} — {formatDate(item.nextDate)}</span><span className={`pill small-pill ${priorityClass(item.priority)}`}>{item.priority}</span></div><div className="item-actions"><button className="icon-button complete-button" onClick={()=>completeResponsibility(item.id)}><Check size={16}/></button><button className="icon-button danger-button" onClick={()=>deleteResponsibility(item.id)}><Trash2 size={16}/></button></div></div>)}</div>}</section>
-          <section className="card"><div className="card-head"><h2>Brain dump inbox</h2><Inbox size={20}/></div>{data.brainDump.length===0?<p className="muted">Your inbox is empty.</p>:<div className="list">{data.brainDump.map((note)=><div className="item" key={note.id}><div><strong>{note.text}</strong><span>{new Date(note.createdAt).toLocaleString("en-GB")}</span></div><button className="icon-button danger-button" onClick={()=>setData((current)=>current?{...current,brainDump:current.brainDump.filter((x)=>x.id!==note.id)}:current)}><Trash2 size={16}/></button></div>)}</div>}</section>
-        </div>}
-      </main>
-
-      <nav className="bottom-nav" aria-label="Main navigation">
-        <NavButton active={view==="today"} onClick={()=>setView("today")} icon={<LayoutDashboard size={19}/>} label="Today"/>
-        <NavButton active={view==="schedule"} onClick={()=>setView("schedule")} icon={<CalendarDays size={19}/>} label="Schedule"/>
-        <NavButton active={view==="add"} onClick={()=>setView("add")} icon={<Plus size={19}/>} label="Add"/>
-        <NavButton active={view==="money"} onClick={()=>setView("money")} icon={<CircleDollarSign size={19}/>} label="Money"/>
-        <NavButton active={view==="life"} onClick={()=>setView("life")} icon={<Home size={19}/>} label="Life"/>
-      </nav>
-    </div>
-  );
+export default function LifeOS(){
+ const [view,setView]=useState<View>("today"); const [addMode,setAddMode]=useState<AddMode>("task"); const [moneyTab,setMoneyTab]=useState<MoneyTab>("overview");
+ const [data,setData]=useState<AppData|null>(null); const [command,setCommand]=useState(""); const [notifications,setNotifications]=useState<NotificationPermission|"unsupported">("default");
+ useEffect(()=>{setData(loadData());setNotifications("Notification" in window?Notification.permission:"unsupported")},[]); useEffect(()=>{if(data)saveData(data)},[data]);
+ const todayTasks=useMemo(()=>(data?.tasks??[]).filter(x=>x.date===todayIso()&&x.status==="open").sort((a,b)=>(a.time??"23:59").localeCompare(b.time??"23:59")),[data]);
+ const upcoming=useMemo(()=>(data?.tasks??[]).filter(x=>x.status==="open").sort((a,b)=>`${a.date}${a.time??""}`.localeCompare(`${b.date}${b.time??""}`)),[data]);
+ if(!data)return <main className="loading-screen">Loading Abrar OS…</main>;
+ const overdue=upcoming.filter(x=>x.date<todayIso()); const dueResp=data.responsibilities.filter(x=>x.active&&x.nextDate<=todayIso());
+ const accountBalance=(id:string)=>{const a=data.accounts.find(x=>x.id===id);return (a?.openingBalance??0)+data.transactions.filter(x=>x.accountId===id).reduce((s,x)=>s+(x.kind==="income"?x.amount:-x.amount),0)};
+ const totalAvailable=data.accounts.filter(x=>x.type!=="Credit card").reduce((s,x)=>s+accountBalance(x.id),0);
+ const billCutoff=data.financeSettings.nextPayday||"9999-12-31"; const upcomingBills=data.bills.filter(x=>x.active&&x.dueDate>=todayIso()&&x.dueDate<=billCutoff).reduce((s,x)=>s+x.amount,0);
+ const safeBalance=totalAvailable-upcomingBills; const totalDebt=data.debts.reduce((s,x)=>s+x.currentBalance,0);
+ const update=(fn:(x:AppData)=>AppData)=>setData(c=>c?fn(c):c);
+ function addTask(t:Omit<Task,"id"|"createdAt"|"status">){update(c=>({...c,tasks:[...c.tasks,{...t,id:createId(),status:"open",createdAt:new Date().toISOString()}]}))}
+ function completeTask(id:string){update(c=>{const o=c.tasks.find(x=>x.id===id);if(!o)return c;const tasks=c.tasks.map(x=>x.id===id?{...x,status:"done" as const,completedAt:new Date().toISOString()}:x);return o.recurrence==="None"?{...c,tasks}:{...c,tasks:[...tasks,{...o,id:createId(),date:nextRecurringDate(o.date,o.recurrence),status:"open",createdAt:new Date().toISOString(),completedAt:undefined}]}})}
+ function addResponsibility(r:Omit<Responsibility,"id"|"createdAt"|"active">){update(c=>({...c,responsibilities:[...c.responsibilities,{...r,id:createId(),active:true,createdAt:new Date().toISOString()}]}))}
+ function submitCommand(e:FormEvent){e.preventDefault();const text=command.trim();if(!text)return;update(c=>({...c,brainDump:[{id:createId(),text,createdAt:new Date().toISOString()},...c.brainDump]}));setCommand("");setView("life")}
+ async function enableNotifications(){if(!("Notification" in window))return setNotifications("unsupported");const p=await Notification.requestPermission();setNotifications(p)}
+ function payBill(b:Bill){update(c=>({...c,transactions:[...c.transactions,{id:createId(),kind:"expense",amount:b.amount,date:todayIso(),category:"Bill",description:b.provider,accountId:b.accountId,createdAt:new Date().toISOString()}],bills:b.frequency==="One-time"?c.bills.map(x=>x.id===b.id?{...x,active:false}:x):c.bills.map(x=>x.id===b.id?{...x,dueDate:advanceBillDate(x.dueDate,x.frequency)}:x)}))}
+ function debtPayment(d:Debt){const raw=prompt("Payment amount (£)",String(d.minimumPayment||0));const amount=Number(raw);if(!amount||amount<0)return;update(c=>({...c,debts:c.debts.map(x=>x.id===d.id?{...x,currentBalance:Math.max(0,x.currentBalance-amount)}:x),debtPayments:[...c.debtPayments,{id:createId(),debtId:d.id,amount,date:todayIso(),createdAt:new Date().toISOString()}],transactions:[...c.transactions,{id:createId(),kind:"expense",amount,date:todayIso(),category:"Debt payment",description:d.lender,createdAt:new Date().toISOString()}]}))}
+ const dateLabel=new Intl.DateTimeFormat("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"}).format(new Date());
+ return <div className="shell"><header className="topbar"><div className="brand"><h1>Abrar OS</h1><p>{dateLabel}</p></div><button className="notification-button" onClick={enableNotifications}><Bell size={17}/>{notifications==="granted"?"Reminders on":"Enable reminders"}</button></header>
+ <main className="main">
+ {view==="today"&&<><section className="card"><div className="card-head"><div><span className="pill success">Life command centre</span><h2 className="top-title">Put it out of your mind</h2><p className="muted top-copy">Capture anything immediately.</p></div><Inbox size={24}/></div><form onSubmit={submitCommand} className="command-row"><input className="command" value={command} onChange={e=>setCommand(e.target.value)} placeholder="Example: Pay nursery Friday £210"/><button className="primary-button">Save</button></form><div className="quick-grid"><button className="quick" onClick={()=>{setAddMode("task");setView("add")}}>Add task</button><button className="quick" onClick={()=>{setAddMode("responsibility");setView("add")}}>Responsibility</button><button className="quick" onClick={()=>setView("money")}>Add money item</button><button className="quick" onClick={()=>setView("life")}>Brain dump</button></div></section>
+ <section className="hero section-gap"><article className="card"><div className="card-head"><h2>Needs attention</h2><span className={`pill ${overdue.length+dueResp.length?"warning":"success"}`}>{overdue.length+dueResp.length?`${overdue.length+dueResp.length} urgent`:"Clear"}</span></div>{!overdue.length&&!dueResp.length?<p className="muted">Nothing overdue.</p>:<div className="list">{overdue.map(x=><Mini key={x.id} title={x.title} meta={`Overdue since ${formatDate(x.date)}`}/>) }{dueResp.map(x=><Mini key={x.id} title={x.title} meta={`${x.nextAction} • ${formatDate(x.nextDate)}`}/>)}</div>}</article><article className="card"><h2>Safe balance</h2><div className="stat">{money(safeBalance)}</div><p className="muted">Available money minus bills due before payday.</p><span className={`pill ${safeBalance<0?"danger":"success"}`}>{data.financeSettings.nextPayday?`Payday ${formatDate(data.financeSettings.nextPayday)}`:"Set payday in Money"}</span></article></section>
+ <section className="grid three section-gap"><article className="card"><div className="card-head"><h2>Today’s tasks</h2><ListTodo size={19}/></div><TaskList tasks={todayTasks.slice(0,4)} complete={completeTask} remove={id=>update(c=>({...c,tasks:c.tasks.filter(x=>x.id!==id)}))}/></article><article className="card"><h2>Upcoming bills</h2><div className="stat">{money(upcomingBills)}</div><p className="muted">Due before payday.</p></article><article className="card"><h2>Total debt</h2><div className="stat">{money(totalDebt)}</div><p className="muted">Accepted, informal and disputed amounts are shown separately inside Money.</p></article></section></>}
+ {view==="schedule"&&<section className="card"><div className="card-head"><h2>Schedule</h2><CalendarDays size={20}/></div><TaskList tasks={upcoming} complete={completeTask} remove={id=>update(c=>({...c,tasks:c.tasks.filter(x=>x.id!==id)}))} showDate/></section>}
+ {view==="add"&&(addMode==="task"?<TaskForm save={x=>{addTask(x);setView("today")}}/>:<ResponsibilityForm save={x=>{addResponsibility(x);setView("life")}}/>)}
+ {view==="money"&&<MoneyPanel data={data} setData={update} tab={moneyTab} setTab={setMoneyTab} accountBalance={accountBalance} safeBalance={safeBalance} totalAvailable={totalAvailable} upcomingBills={upcomingBills} totalDebt={totalDebt} payBill={payBill} debtPayment={debtPayment}/>} 
+ {view==="life"&&<div className="grid two"><section className="card"><div className="card-head"><h2>Responsibilities</h2><ShieldCheck size={20}/></div><div className="list">{data.responsibilities.map(x=><div className="item" key={x.id}><div className="task-content"><strong>{x.title}</strong><span>{x.area} • {x.owner} • {x.frequency}</span><span>Next: {x.nextAction} — {formatDate(x.nextDate)}</span></div><div className="item-actions"><button className="icon-button complete-button" onClick={()=>update(c=>({...c,responsibilities:c.responsibilities.map(r=>r.id===x.id?{...r,nextDate:responsibilityNextDate(r.frequency)}:r)}))}><Check size={16}/></button><button className="icon-button danger-button" onClick={()=>update(c=>({...c,responsibilities:c.responsibilities.filter(r=>r.id!==x.id)}))}><Trash2 size={16}/></button></div></div>)}</div></section><section className="card"><div className="card-head"><h2>Brain dump</h2><Inbox size={20}/></div>{data.brainDump.length?<div className="list">{data.brainDump.map(x=><div className="item" key={x.id}><div><strong>{x.text}</strong><span>{new Date(x.createdAt).toLocaleString("en-GB")}</span></div><button className="icon-button danger-button" onClick={()=>update(c=>({...c,brainDump:c.brainDump.filter(n=>n.id!==x.id)}))}><Trash2 size={16}/></button></div>)}</div>:<p className="muted">Inbox empty.</p>}</section></div>}
+ </main><nav className="bottom-nav"><Nav active={view==="today"} go={()=>setView("today")} icon={<LayoutDashboard size={19}/>} label="Today"/><Nav active={view==="schedule"} go={()=>setView("schedule")} icon={<CalendarDays size={19}/>} label="Schedule"/><Nav active={view==="add"} go={()=>setView("add")} icon={<Plus size={19}/>} label="Add"/><Nav active={view==="money"} go={()=>setView("money")} icon={<CircleDollarSign size={19}/>} label="Money"/><Nav active={view==="life"} go={()=>setView("life")} icon={<Home size={19}/>} label="Life"/></nav></div>
 }
 
-function responsibilityNextDate(frequency:string){const d=new Date();const f=frequency.toLowerCase();if(f.includes("daily"))d.setDate(d.getDate()+1);else if(f.includes("weekly"))d.setDate(d.getDate()+7);else if(f.includes("year"))d.setFullYear(d.getFullYear()+1);else d.setMonth(d.getMonth()+1);return d.toISOString().slice(0,10)}
-function NavButton({active,onClick,icon,label}:{active:boolean;onClick:()=>void;icon:React.ReactNode;label:string}){return <button className={`nav-button ${active?"active":""}`} onClick={onClick}>{icon}{label}</button>}
-
-function TaskList({tasks,onComplete,onDelete,empty,showDate=false}:{tasks:Task[];onComplete:(id:string)=>void;onDelete:(id:string)=>void;empty:string;showDate?:boolean}){
-  if(!tasks.length)return <p className="muted">{empty}</p>;
-  return <div className="list">{tasks.map((task)=><div className="item" key={task.id}><div className="task-content"><strong>{task.title}</strong><span>{showDate?`${formatDate(task.date)} • `:""}{task.time||"Any time"} • {task.category}</span><div className="inline-pills"><span className={`pill small-pill ${priorityClass(task.priority)}`}>{task.priority}</span>{task.recurrence!=="None"&&<span className="pill small-pill"><Repeat2 size={12}/>{task.recurrence}</span>}{task.reminderMinutes? <span className="pill small-pill"><Bell size={12}/>{task.reminderMinutes}m</span>:null}</div></div><div className="item-actions"><button className="icon-button complete-button" onClick={()=>onComplete(task.id)}><Check size={16}/></button><button className="icon-button danger-button" onClick={()=>onDelete(task.id)}><Trash2 size={16}/></button></div></div>)}</div>
+function MoneyPanel({data,setData,tab,setTab,accountBalance,safeBalance,totalAvailable,upcomingBills,totalDebt,payBill,debtPayment}:{data:AppData;setData:(f:(x:AppData)=>AppData)=>void;tab:MoneyTab;setTab:(x:MoneyTab)=>void;accountBalance:(id:string)=>number;safeBalance:number;totalAvailable:number;upcomingBills:number;totalDebt:number;payBill:(b:Bill)=>void;debtPayment:(d:Debt)=>void}){
+ return <><section className="card"><div className="card-head"><div><h2>Money command centre</h2><p className="muted">Manual tracking with no bank connection or fee.</p></div><WalletCards size={21}/></div><div className="money-tabs">{(["overview","accounts","transactions","bills","debts"] as MoneyTab[]).map(x=><button key={x} className={tab===x?"active":""} onClick={()=>setTab(x)}>{x}</button>)}</div></section>
+ {tab==="overview"&&<><section className="grid three"><Stat title="Available" value={money(totalAvailable)}/><Stat title="Bills before payday" value={money(upcomingBills)}/><Stat title="Safe balance" value={money(safeBalance)} danger={safeBalance<0}/></section><section className="grid two section-gap"><section className="card"><h2>Payday</h2><label className="field">Next payday<input type="date" value={data.financeSettings.nextPayday} onChange={e=>setData(c=>({...c,financeSettings:{nextPayday:e.target.value}}))}/></label></section><section className="card"><h2>Debt total</h2><div className="stat">{money(totalDebt)}</div><p className="muted">Disputed amounts remain clearly labelled.</p></section></section></>}
+ {tab==="accounts"&&<section className="grid two"><AccountForm save={a=>setData(c=>({...c,accounts:[...c.accounts,{...a,id:createId(),createdAt:new Date().toISOString()}]}))}/><section className="card"><h2>Accounts</h2>{data.accounts.length?<div className="list">{data.accounts.map(a=><div className="item" key={a.id}><div><strong>{a.name}</strong><span>{a.type}</span></div><div><strong>{money(accountBalance(a.id))}</strong><button className="icon-button danger-button" onClick={()=>setData(c=>({...c,accounts:c.accounts.filter(x=>x.id!==a.id)}))}><Trash2 size={15}/></button></div></div>)}</div>:<p className="muted">No accounts yet.</p>}</section></section>}
+ {tab==="transactions"&&<section className="grid two"><TransactionForm accounts={data.accounts} save={t=>setData(c=>({...c,transactions:[...c.transactions,{...t,id:createId(),createdAt:new Date().toISOString()}]}))}/><section className="card"><h2>Recent transactions</h2>{data.transactions.length?<div className="list">{data.transactions.slice().reverse().map(t=><div className="item" key={t.id}><div><strong>{t.description}</strong><span>{formatDate(t.date)} • {t.category}</span></div><strong className={t.kind==="income"?"positive":"negative"}>{t.kind==="income"?"+":"-"}{money(t.amount)}</strong></div>)}</div>:<p className="muted">No transactions yet.</p>}</section></section>}
+ {tab==="bills"&&<section className="grid two"><BillForm accounts={data.accounts} save={b=>setData(c=>({...c,bills:[...c.bills,{...b,id:createId(),active:true,createdAt:new Date().toISOString()}]}))}/><section className="card"><h2>Bills & direct debits</h2>{data.bills.length?<div className="list">{data.bills.map(b=><div className="item" key={b.id}><div><strong>{b.provider} — {money(b.amount)}</strong><span>{b.paymentType} • {b.frequency} • {formatDate(b.dueDate)}</span></div><div className="item-actions"><button className="small-action" onClick={()=>payBill(b)}>Paid</button><button className="icon-button danger-button" onClick={()=>setData(c=>({...c,bills:c.bills.filter(x=>x.id!==b.id)}))}><Trash2 size={15}/></button></div></div>)}</div>:<p className="muted">No bills yet.</p>}</section></section>}
+ {tab==="debts"&&<section className="grid two"><DebtForm save={d=>setData(c=>({...c,debts:[...c.debts,{...d,id:createId(),createdAt:new Date().toISOString()}]}))}/><section className="card"><h2>Loans, cards & claims</h2>{data.debts.length?<div className="list">{data.debts.map(d=><div className="item" key={d.id}><div className="task-content"><strong>{d.lender} — {money(d.currentBalance)}</strong><span>{d.status} • minimum {money(d.minimumPayment)} • {d.interestRate}%</span><div className="progress"><span style={{width:`${d.originalBalance?Math.max(0,100-(d.currentBalance/d.originalBalance*100)):0}%`}}/></div></div><div className="item-actions"><button className="small-action" onClick={()=>debtPayment(d)}>Payment</button><button className="icon-button danger-button" onClick={()=>setData(c=>({...c,debts:c.debts.filter(x=>x.id!==d.id)}))}><Trash2 size={15}/></button></div></div>)}</div>:<p className="muted">No debts added.</p>}</section></section>}
+ </>
 }
 
-function TaskForm({onSave}:{onSave:(task:Omit<Task,"id"|"createdAt"|"status">)=>void}){
-  const [title,setTitle]=useState("");const [date,setDate]=useState(todayIso());const [time,setTime]=useState("");const [category,setCategory]=useState("Personal");const [priority,setPriority]=useState<Priority>("Medium");const [recurrence,setRecurrence]=useState<Recurrence>("None");const [reminderMinutes,setReminderMinutes]=useState(0);const [notes,setNotes]=useState("");
-  function submit(e:FormEvent){e.preventDefault();if(!title.trim())return;onSave({title:title.trim(),date,time,category,priority,recurrence,reminderMinutes,notes:notes.trim()})}
-  return <section className="card"><div className="card-head"><h2>Add task or reminder</h2><Plus size={20}/></div><form className="form-grid" onSubmit={submit}>
-    <label className="field full-field">Task title<input value={title} onChange={(e)=>setTitle(e.target.value)} required/></label>
-    <label className="field">Date<input type="date" value={date} onChange={(e)=>setDate(e.target.value)} required/></label><label className="field">Time<input type="time" value={time} onChange={(e)=>setTime(e.target.value)}/></label>
-    <label className="field">Category<select value={category} onChange={(e)=>setCategory(e.target.value)}>{categories.map((x)=><option key={x}>{x}</option>)}</select></label><label className="field">Priority<select value={priority} onChange={(e)=>setPriority(e.target.value as Priority)}><option>Low</option><option>Medium</option><option>High</option><option>Critical</option></select></label>
-    <label className="field">Repeat<select value={recurrence} onChange={(e)=>setRecurrence(e.target.value as Recurrence)}>{recurrenceOptions.map((x)=><option key={x}>{x}</option>)}</select></label><label className="field">Remind before<select value={reminderMinutes} onChange={(e)=>setReminderMinutes(Number(e.target.value))}><option value={0}>No browser reminder</option><option value={5}>5 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 hour</option><option value={1440}>1 day</option></select></label>
-    <label className="field full-field">Notes<textarea value={notes} onChange={(e)=>setNotes(e.target.value)}/></label><div className="form-actions full-field"><button className="primary-button">Save task</button></div>
-  </form></section>
-}
-
-function ResponsibilityForm({onSave}:{onSave:(item:Omit<Responsibility,"id"|"createdAt"|"active">)=>void}){
-  const [title,setTitle]=useState("");const [area,setArea]=useState("Family");const [owner,setOwner]=useState("Abrar");const [frequency,setFrequency]=useState("Monthly");const [priority,setPriority]=useState<Priority>("High");const [nextAction,setNextAction]=useState("");const [nextDate,setNextDate]=useState(todayIso());
-  function submit(e:FormEvent){e.preventDefault();if(!title.trim()||!nextAction.trim())return;onSave({title:title.trim(),area,owner,frequency,priority,nextAction:nextAction.trim(),nextDate})}
-  return <section className="card"><div className="card-head"><h2>Add responsibility</h2><ShieldCheck size={20}/></div><form className="form-grid" onSubmit={submit}>
-    <label className="field full-field">Responsibility<input value={title} onChange={(e)=>setTitle(e.target.value)} required placeholder="Example: Manage children’s nursery"/></label><label className="field">Area<select value={area} onChange={(e)=>setArea(e.target.value)}>{categories.map((x)=><option key={x}>{x}</option>)}</select></label><label className="field">Owner<input value={owner} onChange={(e)=>setOwner(e.target.value)}/></label>
-    <label className="field">Frequency<select value={frequency} onChange={(e)=>setFrequency(e.target.value)}><option>Daily</option><option>Weekly</option><option>Monthly</option><option>Yearly</option><option>As needed</option></select></label><label className="field">Priority<select value={priority} onChange={(e)=>setPriority(e.target.value as Priority)}><option>Low</option><option>Medium</option><option>High</option><option>Critical</option></select></label>
-    <label className="field full-field">Next action<input value={nextAction} onChange={(e)=>setNextAction(e.target.value)} required/></label><label className="field">Next review date<input type="date" value={nextDate} onChange={(e)=>setNextDate(e.target.value)}/></label><div className="form-actions full-field"><button className="primary-button">Save responsibility</button></div>
-  </form></section>
-}
+function Nav({active,go,icon,label}:{active:boolean;go:()=>void;icon:ReactNode;label:string}){return <button className={`nav-button ${active?"active":""}`} onClick={go}>{icon}{label}</button>}
+function Mini({title,meta}:{title:string;meta:string}){return <div className="item"><div><strong>{title}</strong><span>{meta}</span></div></div>}
+function Stat({title,value,danger=false}:{title:string;value:string;danger?:boolean}){return <section className="card"><h2>{title}</h2><div className={`stat ${danger?"negative":""}`}>{value}</div></section>}
+function TaskList({tasks,complete,remove,showDate=false}:{tasks:Task[];complete:(id:string)=>void;remove:(id:string)=>void;showDate?:boolean}){return tasks.length?<div className="list">{tasks.map(t=><div className="item" key={t.id}><div className="task-content"><strong>{t.title}</strong><span>{showDate?`${formatDate(t.date)} • `:""}{t.time||"Any time"} • {t.category}</span><div className="inline-pills"><span className={`pill small-pill ${priorityClass(t.priority)}`}>{t.priority}</span>{t.recurrence!=="None"&&<span className="pill small-pill"><Repeat2 size={12}/>{t.recurrence}</span>}</div></div><div className="item-actions"><button className="icon-button complete-button" onClick={()=>complete(t.id)}><Check size={16}/></button><button className="icon-button danger-button" onClick={()=>remove(t.id)}><Trash2 size={16}/></button></div></div>)}</div>:<p className="muted">Nothing here yet.</p>}
+function TaskForm({save}:{save:(x:Omit<Task,"id"|"createdAt"|"status">)=>void}){const [x,setX]=useState({title:"",date:todayIso(),time:"",category:"Personal",priority:"Medium" as Priority,recurrence:"None" as Recurrence,reminderMinutes:0,notes:""});return <Form title="Add task" submit={e=>{e.preventDefault();if(x.title.trim())save(x)}}>{Object.keys(x).map(k=>k==="notes"?<Field key={k} label="Notes"><textarea value={x.notes} onChange={e=>setX({...x,notes:e.target.value})}/></Field>:k==="priority"?<Field key={k} label="Priority"><select value={x.priority} onChange={e=>setX({...x,priority:e.target.value as Priority})}>{["Low","Medium","High","Critical"].map(v=><option key={v}>{v}</option>)}</select></Field>:k==="recurrence"?<Field key={k} label="Repeat"><select value={x.recurrence} onChange={e=>setX({...x,recurrence:e.target.value as Recurrence})}>{["None","Daily","Weekly","Monthly","Yearly"].map(v=><option key={v}>{v}</option>)}</select></Field>:k==="category"?<Field key={k} label="Category"><select value={x.category} onChange={e=>setX({...x,category:e.target.value})}>{categories.map(v=><option key={v}>{v}</option>)}</select></Field>:<Field key={k} label={k}><input type={k==="date"?"date":k==="time"?"time":k==="reminderMinutes"?"number":"text"} value={x[k as keyof typeof x]} onChange={e=>setX({...x,[k]:k==="reminderMinutes"?Number(e.target.value):e.target.value})}/></Field>)}</Form>}
+function ResponsibilityForm({save}:{save:(x:Omit<Responsibility,"id"|"createdAt"|"active">)=>void}){const [x,setX]=useState({title:"",area:"Family",owner:"Abrar",frequency:"Monthly",priority:"High" as Priority,nextAction:"",nextDate:todayIso()});return <Form title="Add responsibility" submit={e=>{e.preventDefault();if(x.title.trim())save(x)}}>{Object.entries(x).map(([k,v])=><Field key={k} label={k}><input type={k==="nextDate"?"date":"text"} value={v} onChange={e=>setX({...x,[k]:e.target.value})}/></Field>)}</Form>}
+function AccountForm({save}:{save:(x:Omit<Account,"id"|"createdAt">)=>void}){const [x,setX]=useState({name:"",type:"Current account" as Account["type"],openingBalance:0});return <Form title="Add account" submit={e=>{e.preventDefault();if(x.name)save(x)}}><Field label="Name"><input value={x.name} onChange={e=>setX({...x,name:e.target.value})}/></Field><Field label="Type"><select value={x.type} onChange={e=>setX({...x,type:e.target.value as Account["type"]})}>{["Current account","Cash","Savings","Credit card","Business","Pakistan account","Other"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Opening balance"><input type="number" step="0.01" value={x.openingBalance} onChange={e=>setX({...x,openingBalance:Number(e.target.value)})}/></Field></Form>}
+function TransactionForm({accounts,save}:{accounts:Account[];save:(x:{kind:TransactionKind;amount:number;date:string;category:string;description:string;accountId?:string})=>void}){const [x,setX]=useState({kind:"expense" as TransactionKind,amount:0,date:todayIso(),category:"Other",description:"",accountId:""});return <Form title="Add income or expense" submit={e=>{e.preventDefault();if(x.amount&&x.description)save(x)}}><Field label="Type"><select value={x.kind} onChange={e=>setX({...x,kind:e.target.value as TransactionKind})}><option value="income">Income</option><option value="expense">Expense</option></select></Field><Field label="Amount"><input type="number" step="0.01" value={x.amount} onChange={e=>setX({...x,amount:Number(e.target.value)})}/></Field><Field label="Date"><input type="date" value={x.date} onChange={e=>setX({...x,date:e.target.value})}/></Field><Field label="Category"><input value={x.category} onChange={e=>setX({...x,category:e.target.value})}/></Field><Field label="Description"><input value={x.description} onChange={e=>setX({...x,description:e.target.value})}/></Field><Field label="Account"><select value={x.accountId} onChange={e=>setX({...x,accountId:e.target.value})}><option value="">Not selected</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></Field></Form>}
+function BillForm({accounts,save}:{accounts:Account[];save:(x:Omit<Bill,"id"|"active"|"createdAt">)=>void}){const [x,setX]=useState({provider:"",amount:0,dueDate:todayIso(),frequency:"Monthly" as BillFrequency,paymentType:"Direct debit" as Bill["paymentType"],accountId:"",variable:false});return <Form title="Add bill or direct debit" submit={e=>{e.preventDefault();if(x.provider&&x.amount)save(x)}}><Field label="Provider"><input value={x.provider} onChange={e=>setX({...x,provider:e.target.value})}/></Field><Field label="Amount"><input type="number" step="0.01" value={x.amount} onChange={e=>setX({...x,amount:Number(e.target.value)})}/></Field><Field label="Next date"><input type="date" value={x.dueDate} onChange={e=>setX({...x,dueDate:e.target.value})}/></Field><Field label="Frequency"><select value={x.frequency} onChange={e=>setX({...x,frequency:e.target.value as BillFrequency})}>{["Weekly","Monthly","Quarterly","Yearly","One-time"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Payment type"><select value={x.paymentType} onChange={e=>setX({...x,paymentType:e.target.value as Bill["paymentType"]})}>{["Direct debit","Standing order","Manual bill","Subscription"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Account"><select value={x.accountId} onChange={e=>setX({...x,accountId:e.target.value})}><option value="">Not selected</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></Field></Form>}
+function DebtForm({save}:{save:(x:Omit<Debt,"id"|"createdAt">)=>void}){const [x,setX]=useState({lender:"",originalBalance:0,currentBalance:0,interestRate:0,minimumPayment:0,dueDate:todayIso(),status:"Accepted" as DebtStatus,notes:""});return <Form title="Add loan, card or claim" submit={e=>{e.preventDefault();if(x.lender&&x.currentBalance>=0)save(x)}}>{(["lender","originalBalance","currentBalance","interestRate","minimumPayment","dueDate"] as const).map(k=><Field key={k} label={k}><input type={k==="dueDate"?"date":k==="lender"?"text":"number"} step="0.01" value={x[k]} onChange={e=>setX({...x,[k]:k==="lender"||k==="dueDate"?e.target.value:Number(e.target.value)})}/></Field>)}<Field label="Status"><select value={x.status} onChange={e=>setX({...x,status:e.target.value as DebtStatus})}>{["Accepted","Claimed / disputed","Informal","Paid off"].map(v=><option key={v}>{v}</option>)}</select></Field><Field label="Notes"><textarea value={x.notes} onChange={e=>setX({...x,notes:e.target.value})}/></Field></Form>}
+function Form({title,submit,children}:{title:string;submit:(e:FormEvent)=>void;children:ReactNode}){return <section className="card"><h2>{title}</h2><form className="form-grid" onSubmit={submit}>{children}<div className="form-actions full-field"><button className="primary-button">Save</button></div></form></section>}
+function Field({label,children}:{label:string;children:ReactNode}){return <label className="field">{label}{children}</label>}
