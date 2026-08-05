@@ -1,15 +1,22 @@
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import type { AppData, Bill, Task } from "./types";
 
 const STORAGE_KEY = "abrar-os-data-v1";
 const STORAGE_UPDATED_KEY = "abrar-os-data-updated-at";
+const BACKUP_MARKER_PREFIX = "abrar-os-cloud-backup";
 const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString();
 
 export type DataSnapshot = {
   data: AppData;
   updatedAt: string;
+};
+
+export type CloudBackup = {
+  id: string;
+  createdAt: string;
+  sourceUpdatedAt: string;
 };
 
 export const starterData: AppData = {
@@ -80,6 +87,23 @@ export async function loadCloudSnapshot(): Promise<DataSnapshot | null> {
   }
 }
 
+async function createDailyBackup(data: AppData, sourceUpdatedAt: string): Promise<void> {
+  const user = auth?.currentUser;
+  if (!user || !db || typeof window === "undefined") return;
+
+  const date = today();
+  const markerKey = `${BACKUP_MARKER_PREFIX}-${user.uid}-${date}`;
+  if (window.localStorage.getItem(markerKey)) return;
+
+  await setDoc(doc(db, "users", user.uid, "backups", date), {
+    data,
+    ownerUid: user.uid,
+    createdAt: new Date().toISOString(),
+    sourceUpdatedAt
+  });
+  window.localStorage.setItem(markerKey, "created");
+}
+
 export async function saveCloudData(data: AppData, updatedAt = new Date().toISOString()): Promise<void> {
   const user = auth?.currentUser;
   if (!user || !db) return;
@@ -89,6 +113,43 @@ export async function saveCloudData(data: AppData, updatedAt = new Date().toISOS
     { ...data, ownerUid: user.uid, updatedAt },
     { merge: true }
   );
+
+  await createDailyBackup(data, updatedAt);
+}
+
+export async function listCloudBackups(): Promise<CloudBackup[]> {
+  const user = auth?.currentUser;
+  if (!user || !db) return [];
+
+  const snapshot = await getDocs(
+    query(collection(db, "users", user.uid, "backups"), orderBy("createdAt", "desc"), limit(14))
+  );
+
+  return snapshot.docs.map((item) => {
+    const value = item.data() as { createdAt?: string; sourceUpdatedAt?: string };
+    return {
+      id: item.id,
+      createdAt: value.createdAt ?? item.id,
+      sourceUpdatedAt: value.sourceUpdatedAt ?? ""
+    };
+  });
+}
+
+export async function restoreCloudBackup(backupId: string): Promise<AppData> {
+  const user = auth?.currentUser;
+  if (!user || !db) throw new Error("Sign in before restoring a cloud backup.");
+
+  const snapshot = await getDoc(doc(db, "users", user.uid, "backups", backupId));
+  if (!snapshot.exists()) throw new Error("Backup not found.");
+
+  const value = snapshot.data() as { data?: Partial<AppData> };
+  if (!value.data) throw new Error("Backup data is invalid.");
+
+  const restored = migrate(value.data);
+  const restoredAt = new Date().toISOString();
+  saveLocalData(restored, restoredAt);
+  await saveCloudData(restored, restoredAt);
+  return restored;
 }
 
 export function saveData(data: AppData): void {
