@@ -1,3 +1,5 @@
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { auth, db } from "./firebase";
 import type { AppData, Bill, Task } from "./types";
 
 const STORAGE_KEY = "abrar-os-data-v1";
@@ -38,12 +40,53 @@ function migrate(value: Partial<AppData>): AppData {
 
 export function loadData(): AppData {
   if (typeof window === "undefined") return starterData;
-  try { const value = window.localStorage.getItem(STORAGE_KEY); return value ? migrate(JSON.parse(value) as Partial<AppData>) : starterData; }
-  catch { return starterData; }
+  try {
+    const value = window.localStorage.getItem(STORAGE_KEY);
+    return value ? migrate(JSON.parse(value) as Partial<AppData>) : starterData;
+  } catch {
+    return starterData;
+  }
 }
 
-export function saveData(data: AppData): void { if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-export function createId(): string { if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID(); return `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+export async function loadCloudData(): Promise<AppData | null> {
+  const user = auth?.currentUser;
+  if (!user || !db) return null;
+
+  try {
+    const snapshot = await getDoc(doc(db, "users", user.uid, "appData", "main"));
+    if (!snapshot.exists()) return null;
+    return migrate(snapshot.data() as Partial<AppData>);
+  } catch (error) {
+    console.error("Unable to load Abrar OS cloud data", error);
+    return null;
+  }
+}
+
+export function saveData(data: AppData): void {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  const user = auth?.currentUser;
+  if (!user || !db) return;
+
+  void setDoc(
+    doc(db, "users", user.uid, "appData", "main"),
+    {
+      ...data,
+      ownerUid: user.uid,
+      updatedAt: new Date().toISOString()
+    },
+    { merge: true }
+  ).catch((error) => {
+    console.error("Unable to save Abrar OS cloud data", error);
+  });
+}
+
+export function createId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 export function nextRecurringDate(date: string, recurrence: Task["recurrence"]): string {
   const next = new Date(`${date}T12:00:00`);
