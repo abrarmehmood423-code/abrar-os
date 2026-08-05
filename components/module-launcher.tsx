@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpenCheck, Car, ChevronDown, FileText, HeartPulse, Menu, Settings, Sparkles, Users, X } from "lucide-react";
+import { BookOpenCheck, Car, ChevronDown, FileText, HeartPulse, Menu, PoundSterling, Settings, Sparkles, Users, X } from "lucide-react";
 import { useState } from "react";
 
 const modules = [
+  { href: "/money", label: "Money", description: "Accounts, bills, debts and cash flow", icon: PoundSterling, tone: "green" },
   { href: "/health", label: "Health", description: "Medicines, diet and progress", icon: HeartPulse, tone: "green" },
   { href: "/family", label: "Family", description: "Events, appointments and support", icon: Users, tone: "purple" },
   { href: "/documents", label: "Documents", description: "Visas, passports and renewals", icon: FileText, tone: "blue" },
