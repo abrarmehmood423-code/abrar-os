@@ -9,7 +9,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { auth, firebaseConfigured } from "@/lib/firebase";
+import { auth, firebaseConfigured, missingFirebaseVariables } from "@/lib/firebase";
 
 export default function AuthPanel() {
   const [user, setUser] = useState<User | null>(null);
@@ -64,8 +64,12 @@ export default function AuthPanel() {
       <section className="card">
         <h2>Cloud account not connected yet</h2>
         <p className="muted">
-          Abrar OS is still working with local browser storage. Add the Firebase environment variables in Vercel to activate free cloud login and syncing.
+          Abrar OS is still working with local browser storage. The following Vercel variable names are missing from this production build:
         </p>
+        <ul className="section-gap">
+          {missingFirebaseVariables.map((name) => <li key={name}><code>{name}</code></li>)}
+        </ul>
+        <p className="muted">No Firebase values are displayed here.</p>
       </section>
     );
   }
