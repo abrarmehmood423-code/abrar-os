@@ -14,6 +14,8 @@ import {
   saveSettings,
 } from "@/lib/settings-store";
 
+const SESSION_UNLOCKED_KEY = "abrar-os-session-unlocked";
+
 export default function SettingsCentre() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [pin, setPin] = useState("");
@@ -35,16 +37,18 @@ export default function SettingsCentre() {
     const updated = { ...settings, pinHash: await hashPin(pin) };
     setSettings(updated);
     saveSettings(updated);
+    sessionStorage.removeItem(SESSION_UNLOCKED_KEY);
     setPin("");
     setConfirmPin("");
-    setMessage("Privacy PIN saved. The lock screen will be connected in the next refinement.");
+    setMessage("Privacy PIN saved. Abrar OS will lock when you leave this page or after the selected inactivity period.");
   }
 
   function removePin() {
     const updated = { ...settings, pinHash: "" };
     setSettings(updated);
     saveSettings(updated);
-    setMessage("Privacy PIN removed.");
+    sessionStorage.removeItem(SESSION_UNLOCKED_KEY);
+    setMessage("Privacy PIN removed. The application will no longer show the lock screen.");
   }
 
   function downloadBackup() {
@@ -68,6 +72,7 @@ export default function SettingsCentre() {
       try {
         importAllData(String(reader.result));
         setSettings(loadSettings());
+        sessionStorage.removeItem(SESSION_UNLOCKED_KEY);
         setMessage("Backup restored. Refresh the app to reload every module.");
       } catch {
         setMessage("That file is not a valid Abrar OS backup.");
@@ -80,6 +85,7 @@ export default function SettingsCentre() {
     if (!confirm("This permanently deletes all Abrar OS data stored in this browser. Continue?")) return;
     if (!confirm("Final confirmation: delete tasks, money, health, family, documents and all other records?")) return;
     clearAllData();
+    sessionStorage.removeItem(SESSION_UNLOCKED_KEY);
     setSettings(defaultSettings);
     setMessage("All local Abrar OS data has been deleted.");
   }
@@ -111,11 +117,11 @@ export default function SettingsCentre() {
             <div className="card-head"><h2>Privacy PIN</h2><LockKeyhole size={20}/></div>
             <p className="muted">The PIN is hashed before storage. It is not stored as readable text.</p>
             <form className="form-grid" onSubmit={savePin}>
-              <label className="field">New PIN<input inputMode="numeric" type="password" value={pin} onChange={(e)=>setPin(e.target.value)} placeholder="4–8 digits"/></label>
-              <label className="field">Confirm PIN<input inputMode="numeric" type="password" value={confirmPin} onChange={(e)=>setConfirmPin(e.target.value)}/></label>
+              <label className="field">New PIN<input inputMode="numeric" type="password" value={pin} onChange={(e)=>setPin(e.target.value.replace(/\D/g,""))} maxLength={8} placeholder="4–8 digits"/></label>
+              <label className="field">Confirm PIN<input inputMode="numeric" type="password" value={confirmPin} onChange={(e)=>setConfirmPin(e.target.value.replace(/\D/g,""))} maxLength={8}/></label>
               <div className="form-actions full-field"><button type="button" className="quick" onClick={removePin}>Remove PIN</button><button className="primary-button">Save PIN</button></div>
             </form>
-            <div className="inline-pills"><span className={`pill ${settings.pinHash ? "success" : "warning"}`}><ShieldCheck size={13}/>{settings.pinHash ? "PIN configured" : "No PIN configured"}</span></div>
+            <div className="inline-pills"><span className={`pill ${settings.pinHash ? "success" : "warning"}`}><ShieldCheck size={13}/>{settings.pinHash ? "PIN configured and active" : "No PIN configured"}</span></div>
           </section>
         </div>
 
