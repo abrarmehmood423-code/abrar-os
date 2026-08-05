@@ -6,6 +6,7 @@ const moduleLinks = [
   { href: "/family", label: "Family", color: "#7f56d9" },
   { href: "/documents", label: "Documents", color: "#175cd3" },
   { href: "/cars", label: "Cars", color: "#b54708" },
+  { href: "/work", label: "Work & Study", color: "#344054" },
 ];
 
 export default function HomePage() {
@@ -20,6 +21,8 @@ export default function HomePage() {
           zIndex: 40,
           display: "grid",
           gap: 8,
+          maxHeight: "60vh",
+          overflowY: "auto",
         }}
       >
         {moduleLinks.map((item) => (
@@ -34,6 +37,7 @@ export default function HomePage() {
               fontWeight: 800,
               boxShadow: "0 12px 30px rgba(0,0,0,.18)",
               textAlign: "center",
+              whiteSpace: "nowrap",
             }}
           >
             {item.label}
