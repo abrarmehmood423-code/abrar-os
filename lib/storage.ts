@@ -7,6 +7,7 @@ const STORAGE_UPDATED_KEY = "abrar-os-data-updated-at";
 const BACKUP_MARKER_PREFIX = "abrar-os-cloud-backup";
 const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString();
+let cloudSaveQueue: Promise<void> = Promise.resolve();
 
 export type DataSnapshot = {
   data: AppData;
@@ -95,12 +96,16 @@ async function createDailyBackup(data: AppData, sourceUpdatedAt: string): Promis
   const markerKey = `${BACKUP_MARKER_PREFIX}-${user.uid}-${date}`;
   if (window.localStorage.getItem(markerKey)) return;
 
-  await setDoc(doc(db, "users", user.uid, "backups", date), {
-    data,
-    ownerUid: user.uid,
-    createdAt: new Date().toISOString(),
-    sourceUpdatedAt
-  });
+  const backupRef = doc(db, "users", user.uid, "backups", date);
+  const existing = await getDoc(backupRef);
+  if (!existing.exists()) {
+    await setDoc(backupRef, {
+      data,
+      ownerUid: user.uid,
+      createdAt: new Date().toISOString(),
+      sourceUpdatedAt
+    });
+  }
   window.localStorage.setItem(markerKey, "created");
 }
 
@@ -115,6 +120,15 @@ export async function saveCloudData(data: AppData, updatedAt = new Date().toISOS
   );
 
   await createDailyBackup(data, updatedAt);
+}
+
+function queueCloudSave(data: AppData, updatedAt: string): void {
+  cloudSaveQueue = cloudSaveQueue
+    .catch(() => undefined)
+    .then(() => saveCloudData(data, updatedAt))
+    .catch((error) => {
+      console.error("Unable to save Abrar OS cloud data", error);
+    });
 }
 
 export async function listCloudBackups(): Promise<CloudBackup[]> {
@@ -155,9 +169,7 @@ export async function restoreCloudBackup(backupId: string): Promise<AppData> {
 export function saveData(data: AppData): void {
   const updatedAt = new Date().toISOString();
   saveLocalData(data, updatedAt);
-  void saveCloudData(data, updatedAt).catch((error) => {
-    console.error("Unable to save Abrar OS cloud data", error);
-  });
+  queueCloudSave(data, updatedAt);
 }
 
 export function createId(): string {
