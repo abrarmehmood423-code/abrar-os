@@ -1,6 +1,13 @@
 import Link from "next/link";
 import LifeOS from "@/components/life-os";
 
+const moduleLinks = [
+  { href: "/health", label: "Health", color: "#067647" },
+  { href: "/family", label: "Family", color: "#7f56d9" },
+  { href: "/documents", label: "Documents", color: "#175cd3" },
+  { href: "/cars", label: "Cars", color: "#b54708" },
+];
+
 export default function HomePage() {
   return (
     <>
@@ -15,48 +22,23 @@ export default function HomePage() {
           gap: 8,
         }}
       >
-        <Link
-          href="/health"
-          style={{
-            padding: "11px 15px",
-            borderRadius: 14,
-            background: "#067647",
-            color: "white",
-            fontWeight: 800,
-            boxShadow: "0 12px 30px rgba(0,0,0,.18)",
-            textAlign: "center",
-          }}
-        >
-          Health
-        </Link>
-        <Link
-          href="/family"
-          style={{
-            padding: "11px 15px",
-            borderRadius: 14,
-            background: "#7f56d9",
-            color: "white",
-            fontWeight: 800,
-            boxShadow: "0 12px 30px rgba(0,0,0,.18)",
-            textAlign: "center",
-          }}
-        >
-          Family
-        </Link>
-        <Link
-          href="/documents"
-          style={{
-            padding: "11px 15px",
-            borderRadius: 14,
-            background: "#175cd3",
-            color: "white",
-            fontWeight: 800,
-            boxShadow: "0 12px 30px rgba(0,0,0,.18)",
-            textAlign: "center",
-          }}
-        >
-          Documents
-        </Link>
+        {moduleLinks.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            style={{
+              padding: "11px 15px",
+              borderRadius: 14,
+              background: item.color,
+              color: "white",
+              fontWeight: 800,
+              boxShadow: "0 12px 30px rgba(0,0,0,.18)",
+              textAlign: "center",
+            }}
+          >
+            {item.label}
+          </Link>
+        ))}
       </div>
     </>
   );
