@@ -3,6 +3,7 @@ import PrivacyGate from "@/components/privacy-gate";
 import "./globals.css";
 import "./money.css";
 import "./privacy.css";
+import "./module-launcher.css";
 
 export const metadata: Metadata = {
   title: "Abrar OS",
