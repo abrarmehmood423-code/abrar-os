@@ -1,0 +1,9 @@
+export type ContactCategory = "Family" | "Friend" | "Employer" | "Client" | "Candidate" | "Care Home" | "GP" | "Hospital" | "Solicitor" | "Accountant" | "Supplier" | "Other";
+export type Contact = { id:string; name:string; category:ContactCategory; company?:string; phone?:string; email?:string; address?:string; notes?:string; createdAt:string };
+export type FollowUpStatus = "Waiting" | "Reply received" | "Completed" | "Closed";
+export type FollowUp = { id:string; subject:string; person:string; contactId?:string; channel:string; lastContact?:string; nextDate:string; priority:"Low"|"Medium"|"High"|"Critical"; status:FollowUpStatus; notes?:string; createdAt:string };
+export type ShoppingItem = { id:string; list:string; name:string; quantity?:string; estimatedCost:number; purchased:boolean; purchasedDate?:string; createdAt:string };
+export type StockItem = { id:string; name:string; category:string; currentQty:number; minimumQty:number; unit:string; lastPurchased?:string; averageMonthlyUse?:number; createdAt:string };
+export type NoteFolder = "Personal"|"Health"|"Money"|"Work"|"Embrace"|"Level 7"|"Family"|"Vehicles"|"Other";
+export type StructuredNote = { id:string; title:string; body:string; folder:NoteFolder; pinned:boolean; archived:boolean; createdAt:string; updatedAt:string };
+export type LifeHubData = { contacts:Contact[]; followUps:FollowUp[]; shopping:ShoppingItem[]; stock:StockItem[]; notes:StructuredNote[] };
