@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import PrivacyGate from "@/components/privacy-gate";
 import "./globals.css";
 import "./money.css";
 
@@ -17,7 +18,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body><PrivacyGate>{children}</PrivacyGate></body>
     </html>
   );
 }
