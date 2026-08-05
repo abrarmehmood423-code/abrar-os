@@ -1,0 +1,10 @@
+{
+  "name": "Abrar OS",
+  "short_name": "Abrar OS",
+  "description": "Your private personal life operating system",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#101828",
+  "icons": []
+}
