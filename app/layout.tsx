@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import PrivacyGate from "@/components/privacy-gate";
 import "./globals.css";
 import "./money.css";
+import "./privacy.css";
 
 export const metadata: Metadata = {
   title: "Abrar OS",
