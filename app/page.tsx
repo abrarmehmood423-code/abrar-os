@@ -43,6 +43,20 @@ export default function HomePage() {
         >
           Family
         </Link>
+        <Link
+          href="/documents"
+          style={{
+            padding: "11px 15px",
+            borderRadius: 14,
+            background: "#175cd3",
+            color: "white",
+            fontWeight: 800,
+            boxShadow: "0 12px 30px rgba(0,0,0,.18)",
+            textAlign: "center",
+          }}
+        >
+          Documents
+        </Link>
       </div>
     </>
   );
