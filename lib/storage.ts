@@ -5,9 +5,13 @@ import type { AppData, Bill, Task } from "./types";
 const STORAGE_KEY = "abrar-os-data-v1";
 const STORAGE_UPDATED_KEY = "abrar-os-data-updated-at";
 const BACKUP_MARKER_PREFIX = "abrar-os-cloud-backup";
+const CLOUD_SAVE_DEBOUNCE_MS = 700;
+const CLOUD_SAVE_MAX_ATTEMPTS = 3;
 const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString();
 let cloudSaveQueue: Promise<void> = Promise.resolve();
+let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingCloudSave: DataSnapshot | null = null;
 
 export type DataSnapshot = {
   data: AppData;
@@ -50,6 +54,24 @@ function migrate(value: Partial<AppData>): AppData {
     debtPayments: value.debtPayments ?? [],
     financeSettings: value.financeSettings ?? { nextPayday: "" }
   };
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function withRetry(operation: () => Promise<void>): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= CLOUD_SAVE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await operation();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < CLOUD_SAVE_MAX_ATTEMPTS) await sleep(400 * 2 ** (attempt - 1));
+    }
+  }
+  throw lastError;
 }
 
 export function loadLocalSnapshot(): DataSnapshot {
@@ -113,22 +135,35 @@ export async function saveCloudData(data: AppData, updatedAt = new Date().toISOS
   const user = auth?.currentUser;
   if (!user || !db) return;
 
-  await setDoc(
-    doc(db, "users", user.uid, "appData", "main"),
-    { ...data, ownerUid: user.uid, updatedAt },
-    { merge: true }
-  );
+  await withRetry(async () => {
+    await setDoc(
+      doc(db, "users", user.uid, "appData", "main"),
+      { ...data, ownerUid: user.uid, updatedAt },
+      { merge: true }
+    );
+  });
 
-  await createDailyBackup(data, updatedAt);
+  await withRetry(() => createDailyBackup(data, updatedAt));
+}
+
+function enqueueLatestCloudSave(): void {
+  const pending = pendingCloudSave;
+  pendingCloudSave = null;
+  cloudSaveTimer = null;
+  if (!pending) return;
+
+  cloudSaveQueue = cloudSaveQueue
+    .catch(() => undefined)
+    .then(() => saveCloudData(pending.data, pending.updatedAt))
+    .catch((error) => {
+      console.error("Unable to save Abrar OS cloud data after retries", error);
+    });
 }
 
 function queueCloudSave(data: AppData, updatedAt: string): void {
-  cloudSaveQueue = cloudSaveQueue
-    .catch(() => undefined)
-    .then(() => saveCloudData(data, updatedAt))
-    .catch((error) => {
-      console.error("Unable to save Abrar OS cloud data", error);
-    });
+  pendingCloudSave = { data, updatedAt };
+  if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(enqueueLatestCloudSave, CLOUD_SAVE_DEBOUNCE_MS);
 }
 
 export async function listCloudBackups(): Promise<CloudBackup[]> {
