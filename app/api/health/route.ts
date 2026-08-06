@@ -1,3 +1,5 @@
+import packageJson from "../../../package.json";
+
 export const dynamic = "force-static";
 
 const commitSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ?? "local";
@@ -13,8 +15,8 @@ export function GET(): Response {
   return Response.json(
     {
       status: "ok",
-      service: "abrar-os",
-      version: "0.9.0",
+      service: packageJson.name,
+      version: packageJson.version,
       commit: commitSha
     },
     { headers: responseHeaders }
