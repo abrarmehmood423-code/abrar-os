@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
 
 // Firebase web configuration is public client configuration.
 // Access control is enforced by Firebase Authentication and Firestore rules.
@@ -20,8 +20,15 @@ let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
 
-app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+const existingApp = getApps().length > 0;
+app = existingApp ? getApp() : initializeApp(firebaseConfig);
 auth = getAuth(app);
-db = getFirestore(app);
+
+// Ignore undefined optional fields rather than rejecting an otherwise valid save.
+// Existing Firestore documents and field values remain untouched because undefined
+// properties are omitted instead of being written or converted.
+db = existingApp
+  ? getFirestore(app)
+  : initializeFirestore(app, { ignoreUndefinedProperties: true });
 
 export { app, auth, db };
