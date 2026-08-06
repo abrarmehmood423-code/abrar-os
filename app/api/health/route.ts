@@ -8,6 +8,8 @@ const responseHeaders = {
   "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
   "Cross-Origin-Resource-Policy": "same-origin",
   "ETag": `"abrar-os-${commitSha}"`,
+  "Permissions-Policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()",
+  "Referrer-Policy": "no-referrer",
   "X-Abrar-OS-Commit": commitSha,
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex, nofollow"
