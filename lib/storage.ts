@@ -12,6 +12,7 @@ const now = () => new Date().toISOString();
 let cloudSaveQueue: Promise<void> = Promise.resolve();
 let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingCloudSave: DataSnapshot | null = null;
+let lifecycleListenersInstalled = false;
 
 export type DataSnapshot = {
   data: AppData;
@@ -149,6 +150,14 @@ export async function saveCloudData(data: AppData, updatedAt = new Date().toISOS
   await withRetry(() => createDailyBackup(data, updatedAt));
 }
 
+function isNewerSnapshot(candidate: DataSnapshot, existing: DataSnapshot | null): boolean {
+  return !existing || candidate.updatedAt > existing.updatedAt;
+}
+
+function preserveFailedSave(snapshot: DataSnapshot): void {
+  if (isNewerSnapshot(snapshot, pendingCloudSave)) pendingCloudSave = snapshot;
+}
+
 function enqueueLatestCloudSave(): void {
   const pending = pendingCloudSave;
   pendingCloudSave = null;
@@ -159,11 +168,32 @@ function enqueueLatestCloudSave(): void {
     .catch(() => undefined)
     .then(() => saveCloudData(pending.data, pending.updatedAt))
     .catch((error) => {
+      preserveFailedSave(pending);
       console.error("Unable to save Abrar OS cloud data after retries", error);
     });
 }
 
+export function flushPendingCloudSave(): void {
+  if (cloudSaveTimer) {
+    clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = null;
+  }
+  enqueueLatestCloudSave();
+}
+
+function installCloudSaveLifecycleListeners(): void {
+  if (typeof window === "undefined" || lifecycleListenersInstalled) return;
+  lifecycleListenersInstalled = true;
+
+  window.addEventListener("online", flushPendingCloudSave);
+  window.addEventListener("pagehide", flushPendingCloudSave);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPendingCloudSave();
+  });
+}
+
 function queueCloudSave(data: AppData, updatedAt: string): void {
+  installCloudSaveLifecycleListeners();
   pendingCloudSave = { data, updatedAt };
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(enqueueLatestCloudSave, CLOUD_SAVE_DEBOUNCE_MS);
