@@ -4,7 +4,8 @@ import type { AppData, Bill, Task } from "./types";
 
 const STORAGE_KEY = "abrar-os-data-v1";
 const STORAGE_UPDATED_KEY = "abrar-os-data-updated-at";
-const PENDING_CLOUD_SAVE_KEY = "abrar-os-pending-cloud-save-v1";
+const LEGACY_PENDING_CLOUD_SAVE_KEY = "abrar-os-pending-cloud-save-v1";
+const PENDING_CLOUD_SAVE_PREFIX = "abrar-os-pending-cloud-save-v2";
 const BACKUP_MARKER_PREFIX = "abrar-os-cloud-backup";
 const CLOUD_SAVE_DEBOUNCE_MS = 700;
 const CLOUD_SAVE_MAX_ATTEMPTS = 3;
@@ -12,12 +13,16 @@ const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString();
 let cloudSaveQueue: Promise<void> = Promise.resolve();
 let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingCloudSave: DataSnapshot | null = null;
+let pendingCloudSave: PendingCloudSave | null = null;
 let lifecycleListenersInstalled = false;
 
 export type DataSnapshot = {
   data: AppData;
   updatedAt: string;
+};
+
+type PendingCloudSave = DataSnapshot & {
+  ownerUid: string | null;
 };
 
 export type CloudBackup = {
@@ -76,30 +81,66 @@ async function withRetry(operation: () => Promise<void>): Promise<void> {
   throw lastError;
 }
 
-function readPersistedPendingSave(): DataSnapshot | null {
+function pendingCloudSaveKey(ownerUid: string | null): string {
+  return `${PENDING_CLOUD_SAVE_PREFIX}-${ownerUid ?? "anonymous"}`;
+}
+
+function parsePendingSave(raw: string, fallbackOwnerUid: string | null): PendingCloudSave | null {
+  const value = JSON.parse(raw) as { data?: Partial<AppData>; updatedAt?: string; ownerUid?: string | null };
+  if (!value.data || typeof value.updatedAt !== "string") return null;
+  return {
+    data: migrate(value.data),
+    updatedAt: value.updatedAt,
+    ownerUid: typeof value.ownerUid === "string" ? value.ownerUid : fallbackOwnerUid
+  };
+}
+
+function readPersistedPendingSave(ownerUid = auth?.currentUser?.uid ?? null): PendingCloudSave | null {
   if (typeof window === "undefined") return null;
+  const key = pendingCloudSaveKey(ownerUid);
   try {
-    const raw = window.localStorage.getItem(PENDING_CLOUD_SAVE_KEY);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as { data?: Partial<AppData>; updatedAt?: string };
-    if (!value.data || typeof value.updatedAt !== "string") return null;
-    return { data: migrate(value.data), updatedAt: value.updatedAt };
+    const scopedRaw = window.localStorage.getItem(key);
+    if (scopedRaw) return parsePendingSave(scopedRaw, ownerUid);
+
+    if (ownerUid) {
+      const anonymousKey = pendingCloudSaveKey(null);
+      const anonymousRaw = window.localStorage.getItem(anonymousKey);
+      if (anonymousRaw) {
+        const claimed = parsePendingSave(anonymousRaw, ownerUid);
+        if (claimed) {
+          window.localStorage.setItem(key, JSON.stringify(claimed));
+          window.localStorage.removeItem(anonymousKey);
+          return claimed;
+        }
+      }
+    }
+
+    const legacyRaw = window.localStorage.getItem(LEGACY_PENDING_CLOUD_SAVE_KEY);
+    if (!legacyRaw) return null;
+    const migrated = parsePendingSave(legacyRaw, ownerUid);
+    if (!migrated) {
+      window.localStorage.removeItem(LEGACY_PENDING_CLOUD_SAVE_KEY);
+      return null;
+    }
+    window.localStorage.setItem(key, JSON.stringify(migrated));
+    window.localStorage.removeItem(LEGACY_PENDING_CLOUD_SAVE_KEY);
+    return migrated;
   } catch {
-    window.localStorage.removeItem(PENDING_CLOUD_SAVE_KEY);
+    window.localStorage.removeItem(key);
     return null;
   }
 }
 
-function persistPendingSave(snapshot: DataSnapshot): void {
+function persistPendingSave(snapshot: PendingCloudSave): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(PENDING_CLOUD_SAVE_KEY, JSON.stringify(snapshot));
+  window.localStorage.setItem(pendingCloudSaveKey(snapshot.ownerUid), JSON.stringify(snapshot));
 }
 
-function clearPersistedPendingSave(savedUpdatedAt: string): void {
+function clearPersistedPendingSave(ownerUid: string | null, savedUpdatedAt: string): void {
   if (typeof window === "undefined") return;
-  const persisted = readPersistedPendingSave();
+  const persisted = readPersistedPendingSave(ownerUid);
   if (!persisted || persisted.updatedAt <= savedUpdatedAt) {
-    window.localStorage.removeItem(PENDING_CLOUD_SAVE_KEY);
+    window.localStorage.removeItem(pendingCloudSaveKey(ownerUid));
   }
 }
 
@@ -141,21 +182,23 @@ export async function loadCloudSnapshot(): Promise<DataSnapshot | null> {
   }
 }
 
-async function createDailyBackup(data: AppData, sourceUpdatedAt: string): Promise<void> {
+async function createDailyBackup(data: AppData, sourceUpdatedAt: string, expectedUid: string): Promise<void> {
   const user = auth?.currentUser;
   const firestore = db;
-  if (!user || !firestore || typeof window === "undefined") return;
+  if (!user || !firestore || user.uid !== expectedUid || typeof window === "undefined") {
+    throw new Error("Cloud account changed before backup completed.");
+  }
 
   const date = today();
-  const markerKey = `${BACKUP_MARKER_PREFIX}-${user.uid}-${date}`;
+  const markerKey = `${BACKUP_MARKER_PREFIX}-${expectedUid}-${date}`;
   if (window.localStorage.getItem(markerKey)) return;
 
-  const backupRef = doc(firestore, "users", user.uid, "backups", date);
+  const backupRef = doc(firestore, "users", expectedUid, "backups", date);
   const existing = await getDoc(backupRef);
   if (!existing.exists()) {
     await setDoc(backupRef, {
       data,
-      ownerUid: user.uid,
+      ownerUid: expectedUid,
       createdAt: new Date().toISOString(),
       sourceUpdatedAt
     });
@@ -163,39 +206,47 @@ async function createDailyBackup(data: AppData, sourceUpdatedAt: string): Promis
   window.localStorage.setItem(markerKey, "created");
 }
 
-export async function saveCloudData(data: AppData, updatedAt = new Date().toISOString()): Promise<void> {
+export async function saveCloudData(data: AppData, updatedAt = new Date().toISOString(), expectedUid?: string): Promise<void> {
   const user = auth?.currentUser;
   const firestore = db;
-  if (!user || !firestore) return;
+  const ownerUid = expectedUid ?? user?.uid;
+  if (!user || !firestore || !ownerUid || user.uid !== ownerUid) {
+    throw new Error("Cloud account is unavailable or changed.");
+  }
 
   await withRetry(async () => {
+    if (auth?.currentUser?.uid !== ownerUid) throw new Error("Cloud account changed during save.");
     await setDoc(
-      doc(firestore, "users", user.uid, "appData", "main"),
-      { ...data, ownerUid: user.uid, updatedAt },
+      doc(firestore, "users", ownerUid, "appData", "main"),
+      { ...data, ownerUid, updatedAt },
       { merge: true }
     );
   });
 
-  await withRetry(() => createDailyBackup(data, updatedAt));
+  await withRetry(() => createDailyBackup(data, updatedAt, ownerUid));
 }
 
 function isNewerSnapshot(candidate: DataSnapshot, existing: DataSnapshot | null): boolean {
   return !existing || candidate.updatedAt > existing.updatedAt;
 }
 
-function preserveFailedSave(snapshot: DataSnapshot): void {
-  if (isNewerSnapshot(snapshot, pendingCloudSave)) pendingCloudSave = snapshot;
-  const latest = pendingCloudSave ?? snapshot;
-  persistPendingSave(latest);
+function preserveFailedSave(snapshot: PendingCloudSave): void {
+  if (!pendingCloudSave || pendingCloudSave.ownerUid !== snapshot.ownerUid || isNewerSnapshot(snapshot, pendingCloudSave)) {
+    pendingCloudSave = snapshot;
+  }
+  persistPendingSave(snapshot);
 }
 
 function enqueueLatestCloudSave(): void {
-  const pending = pendingCloudSave ?? readPersistedPendingSave();
+  const currentUid = auth?.currentUser?.uid ?? null;
+  const pending = pendingCloudSave?.ownerUid === currentUid
+    ? pendingCloudSave
+    : readPersistedPendingSave(currentUid);
   pendingCloudSave = null;
   cloudSaveTimer = null;
   if (!pending) return;
 
-  if (!auth?.currentUser || !db) {
+  if (!currentUid || !db || pending.ownerUid !== currentUid) {
     preserveFailedSave(pending);
     return;
   }
@@ -203,8 +254,8 @@ function enqueueLatestCloudSave(): void {
   cloudSaveQueue = cloudSaveQueue
     .catch(() => undefined)
     .then(async () => {
-      await saveCloudData(pending.data, pending.updatedAt);
-      clearPersistedPendingSave(pending.updatedAt);
+      await saveCloudData(pending.data, pending.updatedAt, currentUid);
+      clearPersistedPendingSave(currentUid, pending.updatedAt);
     })
     .catch((error) => {
       preserveFailedSave(pending);
@@ -240,7 +291,8 @@ function installCloudSaveLifecycleListeners(): void {
 
 function queueCloudSave(data: AppData, updatedAt: string): void {
   installCloudSaveLifecycleListeners();
-  pendingCloudSave = { data, updatedAt };
+  const ownerUid = auth?.currentUser?.uid ?? null;
+  pendingCloudSave = { data, updatedAt, ownerUid };
   persistPendingSave(pendingCloudSave);
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(enqueueLatestCloudSave, CLOUD_SAVE_DEBOUNCE_MS);
@@ -279,8 +331,8 @@ export async function restoreCloudBackup(backupId: string): Promise<AppData> {
   const restored = migrate(value.data);
   const restoredAt = new Date().toISOString();
   saveLocalData(restored, restoredAt);
-  await saveCloudData(restored, restoredAt);
-  clearPersistedPendingSave(restoredAt);
+  await saveCloudData(restored, restoredAt, user.uid);
+  clearPersistedPendingSave(user.uid, restoredAt);
   return restored;
 }
 
