@@ -37,9 +37,10 @@ export default function CloudSyncBridge() {
         if (cancelled) return;
 
         if (!cloud) {
-          const timestamp = local.updatedAt || new Date().toISOString();
-          saveLocalData(local.data, timestamp);
-          await saveCloudData(local.data, timestamp);
+          // A missing result may also mean a temporary Firestore read failure.
+          // Never auto-seed from local storage here because that could overwrite
+          // an existing cloud document. Normal edits and the pending-save outbox
+          // will safely create a new cloud document through timestamp checks.
           sessionStorage.setItem(sessionKey, "1");
           flushPendingCloudSave();
           return;
