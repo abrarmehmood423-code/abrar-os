@@ -9,9 +9,11 @@ import {
   loadLocalSnapshot,
   saveCloudData,
   saveLocalData,
+  type DataSnapshot,
 } from "@/lib/storage";
 
 const SESSION_SYNC_KEY = "abrar-os-cloud-sync-complete";
+const CLOUD_READ_ATTEMPTS = 3;
 
 function readSessionFlag(key: string): boolean {
   try {
@@ -37,6 +39,23 @@ function clearSessionFlag(key: string): void {
   }
 }
 
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function loadConfirmedCloudSnapshot(): Promise<DataSnapshot | null> {
+  for (let attempt = 1; attempt <= CLOUD_READ_ATTEMPTS; attempt += 1) {
+    const snapshot = await loadCloudSnapshot();
+    if (snapshot) return snapshot;
+
+    if (attempt < CLOUD_READ_ATTEMPTS) {
+      await wait(400 * 2 ** (attempt - 1));
+    }
+  }
+
+  return null;
+}
+
 export default function CloudSyncBridge() {
   useEffect(() => {
     if (!auth) return;
@@ -57,14 +76,13 @@ export default function CloudSyncBridge() {
 
       try {
         const local = loadLocalSnapshot();
-        const cloud = await loadCloudSnapshot();
-        if (cancelled) return;
+        const cloud = await loadConfirmedCloudSnapshot();
+        if (cancelled || auth.currentUser?.uid !== user.uid) return;
 
         if (!cloud) {
           // A missing result may also mean a temporary Firestore read failure.
-          // Never auto-seed from local storage here because that could overwrite
-          // an existing cloud document. Normal edits and the pending-save outbox
-          // will safely create a new cloud document through timestamp checks.
+          // Confirm it with bounded retries and never auto-seed here, because an
+          // inconclusive read must not allow local data to replace cloud data.
           writeSessionFlag(sessionKey);
           flushPendingCloudSave();
           return;
