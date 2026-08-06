@@ -126,21 +126,33 @@ function readPersistedPendingSave(ownerUid = auth?.currentUser?.uid ?? null): Pe
     window.localStorage.removeItem(LEGACY_PENDING_CLOUD_SAVE_KEY);
     return migrated;
   } catch {
-    window.localStorage.removeItem(key);
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Browser storage may be disabled; cloud sync can still continue in memory.
+    }
     return null;
   }
 }
 
 function persistPendingSave(snapshot: PendingCloudSave): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(pendingCloudSaveKey(snapshot.ownerUid), JSON.stringify(snapshot));
+  try {
+    window.localStorage.setItem(pendingCloudSaveKey(snapshot.ownerUid), JSON.stringify(snapshot));
+  } catch (error) {
+    console.warn("Unable to persist pending Abrar OS cloud save locally", error);
+  }
 }
 
 function clearPersistedPendingSave(ownerUid: string | null, savedUpdatedAt: string): void {
   if (typeof window === "undefined") return;
   const persisted = readPersistedPendingSave(ownerUid);
   if (!persisted || persisted.updatedAt <= savedUpdatedAt) {
-    window.localStorage.removeItem(pendingCloudSaveKey(ownerUid));
+    try {
+      window.localStorage.removeItem(pendingCloudSaveKey(ownerUid));
+    } catch (error) {
+      console.warn("Unable to clear persisted Abrar OS cloud save", error);
+    }
   }
 }
 
@@ -162,8 +174,12 @@ export function loadData(): AppData {
 
 export function saveLocalData(data: AppData, updatedAt = new Date().toISOString()): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  window.localStorage.setItem(STORAGE_UPDATED_KEY, updatedAt);
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    window.localStorage.setItem(STORAGE_UPDATED_KEY, updatedAt);
+  } catch (error) {
+    console.warn("Unable to save Abrar OS data in browser storage; cloud sync will still be attempted", error);
+  }
 }
 
 export async function loadCloudSnapshot(): Promise<DataSnapshot | null> {
@@ -191,7 +207,11 @@ async function createDailyBackup(data: AppData, sourceUpdatedAt: string, expecte
 
   const date = today();
   const markerKey = `${BACKUP_MARKER_PREFIX}-${expectedUid}-${date}`;
-  if (window.localStorage.getItem(markerKey)) return;
+  try {
+    if (window.localStorage.getItem(markerKey)) return;
+  } catch {
+    // Continue with the Firestore existence check when browser storage is unavailable.
+  }
 
   const backupRef = doc(firestore, "users", expectedUid, "backups", date);
   const existing = await getDoc(backupRef);
@@ -203,7 +223,11 @@ async function createDailyBackup(data: AppData, sourceUpdatedAt: string, expecte
       sourceUpdatedAt
     });
   }
-  window.localStorage.setItem(markerKey, "created");
+  try {
+    window.localStorage.setItem(markerKey, "created");
+  } catch {
+    // The Firestore document is the source of truth; the marker only avoids an extra read.
+  }
 }
 
 export async function saveCloudData(data: AppData, updatedAt = new Date().toISOString(), expectedUid?: string): Promise<void> {
