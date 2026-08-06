@@ -43,10 +43,14 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function loadConfirmedCloudSnapshot(): Promise<DataSnapshot | null> {
+async function loadConfirmedCloudSnapshot(
+  shouldContinue: () => boolean,
+): Promise<DataSnapshot | null> {
   for (let attempt = 1; attempt <= CLOUD_READ_ATTEMPTS; attempt += 1) {
+    if (!shouldContinue()) return null;
+
     const snapshot = await loadCloudSnapshot();
-    if (snapshot) return snapshot;
+    if (!shouldContinue() || snapshot) return snapshot;
 
     if (attempt < CLOUD_READ_ATTEMPTS) {
       await wait(400 * 2 ** (attempt - 1));
@@ -58,11 +62,12 @@ async function loadConfirmedCloudSnapshot(): Promise<DataSnapshot | null> {
 
 export default function CloudSyncBridge() {
   useEffect(() => {
-    if (!auth) return;
+    const authInstance = auth;
+    if (!authInstance) return;
 
     let cancelled = false;
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
       if (cancelled || !user) {
         if (!user) clearSessionFlag(SESSION_SYNC_KEY);
         return;
@@ -74,10 +79,13 @@ export default function CloudSyncBridge() {
         return;
       }
 
+      const shouldContinue = () =>
+        !cancelled && authInstance.currentUser?.uid === user.uid;
+
       try {
         const local = loadLocalSnapshot();
-        const cloud = await loadConfirmedCloudSnapshot();
-        if (cancelled || auth.currentUser?.uid !== user.uid) return;
+        const cloud = await loadConfirmedCloudSnapshot(shouldContinue);
+        if (!shouldContinue()) return;
 
         if (!cloud) {
           // A missing result may also mean a temporary Firestore read failure.
@@ -98,9 +106,10 @@ export default function CloudSyncBridge() {
         }
 
         if (local.updatedAt > cloud.updatedAt) {
-          await saveCloudData(local.data, local.updatedAt);
+          await saveCloudData(local.data, local.updatedAt, user.uid);
         }
 
+        if (!shouldContinue()) return;
         writeSessionFlag(sessionKey);
         flushPendingCloudSave();
       } catch (error) {
