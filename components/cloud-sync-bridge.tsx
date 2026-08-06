@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import {
+  flushPendingCloudSave,
   loadCloudSnapshot,
   loadLocalSnapshot,
   saveCloudData,
@@ -25,7 +26,10 @@ export default function CloudSyncBridge() {
       }
 
       const sessionKey = `${SESSION_SYNC_KEY}:${user.uid}`;
-      if (sessionStorage.getItem(sessionKey) === "1") return;
+      if (sessionStorage.getItem(sessionKey) === "1") {
+        flushPendingCloudSave();
+        return;
+      }
 
       try {
         const local = loadLocalSnapshot();
@@ -37,6 +41,7 @@ export default function CloudSyncBridge() {
           saveLocalData(local.data, timestamp);
           await saveCloudData(local.data, timestamp);
           sessionStorage.setItem(sessionKey, "1");
+          flushPendingCloudSave();
           return;
         }
 
@@ -54,8 +59,10 @@ export default function CloudSyncBridge() {
         }
 
         sessionStorage.setItem(sessionKey, "1");
+        flushPendingCloudSave();
       } catch (error) {
         console.error("Abrar OS cloud synchronisation failed", error);
+        flushPendingCloudSave();
       }
     });
 
