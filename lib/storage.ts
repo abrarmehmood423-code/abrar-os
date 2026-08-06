@@ -9,6 +9,14 @@ const PENDING_CLOUD_SAVE_PREFIX = "abrar-os-pending-cloud-save-v2";
 const BACKUP_MARKER_PREFIX = "abrar-os-cloud-backup";
 const CLOUD_SAVE_DEBOUNCE_MS = 700;
 const CLOUD_SAVE_MAX_ATTEMPTS = 3;
+const RETRYABLE_FIRESTORE_CODES = new Set([
+  "aborted",
+  "cancelled",
+  "deadline-exceeded",
+  "internal",
+  "unavailable",
+  "unknown"
+]);
 const today = () => new Date().toISOString().slice(0, 10);
 const now = () => new Date().toISOString();
 let cloudSaveQueue: Promise<void> = Promise.resolve();
@@ -67,6 +75,13 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function isRetryableCloudError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const rawCode = (error as { code?: unknown }).code;
+  if (typeof rawCode !== "string") return false;
+  return RETRYABLE_FIRESTORE_CODES.has(rawCode.replace(/^firestore\//, ""));
+}
+
 async function withRetry(operation: () => Promise<void>): Promise<void> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= CLOUD_SAVE_MAX_ATTEMPTS; attempt += 1) {
@@ -75,7 +90,8 @@ async function withRetry(operation: () => Promise<void>): Promise<void> {
       return;
     } catch (error) {
       lastError = error;
-      if (attempt < CLOUD_SAVE_MAX_ATTEMPTS) await sleep(400 * 2 ** (attempt - 1));
+      if (attempt >= CLOUD_SAVE_MAX_ATTEMPTS || !isRetryableCloudError(error)) throw error;
+      await sleep(400 * 2 ** (attempt - 1));
     }
   }
   throw lastError;
