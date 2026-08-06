@@ -97,10 +97,11 @@ export function saveLocalData(data: AppData, updatedAt = new Date().toISOString(
 
 export async function loadCloudSnapshot(): Promise<DataSnapshot | null> {
   const user = auth?.currentUser;
-  if (!user || !db) return null;
+  const firestore = db;
+  if (!user || !firestore) return null;
 
   try {
-    const snapshot = await getDoc(doc(db, "users", user.uid, "appData", "main"));
+    const snapshot = await getDoc(doc(firestore, "users", user.uid, "appData", "main"));
     if (!snapshot.exists()) return null;
     const raw = snapshot.data() as Partial<AppData> & { updatedAt?: string };
     return { data: migrate(raw), updatedAt: raw.updatedAt ?? "" };
@@ -112,13 +113,14 @@ export async function loadCloudSnapshot(): Promise<DataSnapshot | null> {
 
 async function createDailyBackup(data: AppData, sourceUpdatedAt: string): Promise<void> {
   const user = auth?.currentUser;
-  if (!user || !db || typeof window === "undefined") return;
+  const firestore = db;
+  if (!user || !firestore || typeof window === "undefined") return;
 
   const date = today();
   const markerKey = `${BACKUP_MARKER_PREFIX}-${user.uid}-${date}`;
   if (window.localStorage.getItem(markerKey)) return;
 
-  const backupRef = doc(db, "users", user.uid, "backups", date);
+  const backupRef = doc(firestore, "users", user.uid, "backups", date);
   const existing = await getDoc(backupRef);
   if (!existing.exists()) {
     await setDoc(backupRef, {
@@ -133,11 +135,12 @@ async function createDailyBackup(data: AppData, sourceUpdatedAt: string): Promis
 
 export async function saveCloudData(data: AppData, updatedAt = new Date().toISOString()): Promise<void> {
   const user = auth?.currentUser;
-  if (!user || !db) return;
+  const firestore = db;
+  if (!user || !firestore) return;
 
   await withRetry(async () => {
     await setDoc(
-      doc(db, "users", user.uid, "appData", "main"),
+      doc(firestore, "users", user.uid, "appData", "main"),
       { ...data, ownerUid: user.uid, updatedAt },
       { merge: true }
     );
@@ -168,10 +171,11 @@ function queueCloudSave(data: AppData, updatedAt: string): void {
 
 export async function listCloudBackups(): Promise<CloudBackup[]> {
   const user = auth?.currentUser;
-  if (!user || !db) return [];
+  const firestore = db;
+  if (!user || !firestore) return [];
 
   const snapshot = await getDocs(
-    query(collection(db, "users", user.uid, "backups"), orderBy("createdAt", "desc"), limit(14))
+    query(collection(firestore, "users", user.uid, "backups"), orderBy("createdAt", "desc"), limit(14))
   );
 
   return snapshot.docs.map((item) => {
@@ -186,9 +190,10 @@ export async function listCloudBackups(): Promise<CloudBackup[]> {
 
 export async function restoreCloudBackup(backupId: string): Promise<AppData> {
   const user = auth?.currentUser;
-  if (!user || !db) throw new Error("Sign in before restoring a cloud backup.");
+  const firestore = db;
+  if (!user || !firestore) throw new Error("Sign in before restoring a cloud backup.");
 
-  const snapshot = await getDoc(doc(db, "users", user.uid, "backups", backupId));
+  const snapshot = await getDoc(doc(firestore, "users", user.uid, "backups", backupId));
   if (!snapshot.exists()) throw new Error("Backup not found.");
 
   const value = snapshot.data() as { data?: Partial<AppData> };
