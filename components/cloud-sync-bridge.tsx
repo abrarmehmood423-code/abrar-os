@@ -13,6 +13,30 @@ import {
 
 const SESSION_SYNC_KEY = "abrar-os-cloud-sync-complete";
 
+function readSessionFlag(key: string): boolean {
+  try {
+    return window.sessionStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSessionFlag(key: string): void {
+  try {
+    window.sessionStorage.setItem(key, "1");
+  } catch {
+    // Session storage is only an optimisation; cloud sync must still continue.
+  }
+}
+
+function clearSessionFlag(key: string): void {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore browsers that block session storage.
+  }
+}
+
 export default function CloudSyncBridge() {
   useEffect(() => {
     if (!auth) return;
@@ -21,12 +45,12 @@ export default function CloudSyncBridge() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (cancelled || !user) {
-        if (!user) sessionStorage.removeItem(SESSION_SYNC_KEY);
+        if (!user) clearSessionFlag(SESSION_SYNC_KEY);
         return;
       }
 
       const sessionKey = `${SESSION_SYNC_KEY}:${user.uid}`;
-      if (sessionStorage.getItem(sessionKey) === "1") {
+      if (readSessionFlag(sessionKey)) {
         flushPendingCloudSave();
         return;
       }
@@ -41,7 +65,7 @@ export default function CloudSyncBridge() {
           // Never auto-seed from local storage here because that could overwrite
           // an existing cloud document. Normal edits and the pending-save outbox
           // will safely create a new cloud document through timestamp checks.
-          sessionStorage.setItem(sessionKey, "1");
+          writeSessionFlag(sessionKey);
           flushPendingCloudSave();
           return;
         }
@@ -50,7 +74,7 @@ export default function CloudSyncBridge() {
 
         if (cloudIsNewer) {
           saveLocalData(cloud.data, cloud.updatedAt || new Date().toISOString());
-          sessionStorage.setItem(sessionKey, "1");
+          writeSessionFlag(sessionKey);
           window.location.reload();
           return;
         }
@@ -59,7 +83,7 @@ export default function CloudSyncBridge() {
           await saveCloudData(local.data, local.updatedAt);
         }
 
-        sessionStorage.setItem(sessionKey, "1");
+        writeSessionFlag(sessionKey);
         flushPendingCloudSave();
       } catch (error) {
         console.error("Abrar OS cloud synchronisation failed", error);
