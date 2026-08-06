@@ -33,6 +33,8 @@ type PendingCloudSave = DataSnapshot & {
   ownerUid: string | null;
 };
 
+type CloudWriteResult = "applied" | "current" | "stale";
+
 export type CloudBackup = {
   id: string;
   createdAt: string;
@@ -254,24 +256,25 @@ export async function saveCloudData(data: AppData, updatedAt = new Date().toISOS
     throw new Error("Cloud account is unavailable or changed.");
   }
 
-  let cloudWriteApplied = false;
+  let cloudWriteResult: CloudWriteResult = "stale";
   await withRetry(async () => {
     if (auth?.currentUser?.uid !== ownerUid) throw new Error("Cloud account changed during save.");
-    cloudWriteApplied = await runTransaction(firestore, async (transaction) => {
+    cloudWriteResult = await runTransaction(firestore, async (transaction): Promise<CloudWriteResult> => {
       const dataRef = doc(firestore, "users", ownerUid, "appData", "main");
       const current = await transaction.get(dataRef);
       const currentUpdatedAt = current.exists()
         ? (current.data() as { updatedAt?: string }).updatedAt ?? ""
         : "";
 
-      if (currentUpdatedAt >= updatedAt) return false;
+      if (currentUpdatedAt > updatedAt) return "stale";
+      if (currentUpdatedAt === updatedAt) return "current";
 
       transaction.set(dataRef, { ...data, ownerUid, updatedAt }, { merge: true });
-      return true;
+      return "applied";
     });
   });
 
-  if (cloudWriteApplied) {
+  if (cloudWriteResult !== "stale") {
     await withRetry(() => createDailyBackup(data, updatedAt, ownerUid));
   }
 }
