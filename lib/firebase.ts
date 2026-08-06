@@ -20,15 +20,16 @@ let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
 
-const existingApp = getApps().length > 0;
-app = existingApp ? getApp() : initializeApp(firebaseConfig);
+app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 auth = getAuth(app);
 
-// Ignore undefined optional fields rather than rejecting an otherwise valid save.
-// Existing Firestore documents and field values remain untouched because undefined
-// properties are omitted instead of being written or converted.
-db = existingApp
-  ? getFirestore(app)
-  : initializeFirestore(app, { ignoreUndefinedProperties: true });
+// Prefer the configured Firestore instance on every initialization path, including
+// development hot reloads and multi-entry builds. If Firestore was already created,
+// reuse that singleton rather than throwing or creating another connection.
+try {
+  db = initializeFirestore(app, { ignoreUndefinedProperties: true });
+} catch {
+  db = getFirestore(app);
+}
 
 export { app, auth, db };
