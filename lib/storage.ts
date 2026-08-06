@@ -4,6 +4,7 @@ import type { AppData, Bill, Task } from "./types";
 
 const STORAGE_KEY = "abrar-os-data-v1";
 const STORAGE_UPDATED_KEY = "abrar-os-data-updated-at";
+const PENDING_CLOUD_SAVE_KEY = "abrar-os-pending-cloud-save-v1";
 const BACKUP_MARKER_PREFIX = "abrar-os-cloud-backup";
 const CLOUD_SAVE_DEBOUNCE_MS = 700;
 const CLOUD_SAVE_MAX_ATTEMPTS = 3;
@@ -75,8 +76,36 @@ async function withRetry(operation: () => Promise<void>): Promise<void> {
   throw lastError;
 }
 
+function readPersistedPendingSave(): DataSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PENDING_CLOUD_SAVE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as { data?: Partial<AppData>; updatedAt?: string };
+    if (!value.data || typeof value.updatedAt !== "string") return null;
+    return { data: migrate(value.data), updatedAt: value.updatedAt };
+  } catch {
+    window.localStorage.removeItem(PENDING_CLOUD_SAVE_KEY);
+    return null;
+  }
+}
+
+function persistPendingSave(snapshot: DataSnapshot): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PENDING_CLOUD_SAVE_KEY, JSON.stringify(snapshot));
+}
+
+function clearPersistedPendingSave(savedUpdatedAt: string): void {
+  if (typeof window === "undefined") return;
+  const persisted = readPersistedPendingSave();
+  if (!persisted || persisted.updatedAt <= savedUpdatedAt) {
+    window.localStorage.removeItem(PENDING_CLOUD_SAVE_KEY);
+  }
+}
+
 export function loadLocalSnapshot(): DataSnapshot {
   if (typeof window === "undefined") return { data: starterData, updatedAt: "" };
+  installCloudSaveLifecycleListeners();
   try {
     const value = window.localStorage.getItem(STORAGE_KEY);
     const updatedAt = window.localStorage.getItem(STORAGE_UPDATED_KEY) ?? "";
@@ -156,17 +185,27 @@ function isNewerSnapshot(candidate: DataSnapshot, existing: DataSnapshot | null)
 
 function preserveFailedSave(snapshot: DataSnapshot): void {
   if (isNewerSnapshot(snapshot, pendingCloudSave)) pendingCloudSave = snapshot;
+  const latest = pendingCloudSave ?? snapshot;
+  persistPendingSave(latest);
 }
 
 function enqueueLatestCloudSave(): void {
-  const pending = pendingCloudSave;
+  const pending = pendingCloudSave ?? readPersistedPendingSave();
   pendingCloudSave = null;
   cloudSaveTimer = null;
   if (!pending) return;
 
+  if (!auth?.currentUser || !db) {
+    preserveFailedSave(pending);
+    return;
+  }
+
   cloudSaveQueue = cloudSaveQueue
     .catch(() => undefined)
-    .then(() => saveCloudData(pending.data, pending.updatedAt))
+    .then(async () => {
+      await saveCloudData(pending.data, pending.updatedAt);
+      clearPersistedPendingSave(pending.updatedAt);
+    })
     .catch((error) => {
       preserveFailedSave(pending);
       console.error("Unable to save Abrar OS cloud data after retries", error);
@@ -185,16 +224,24 @@ function installCloudSaveLifecycleListeners(): void {
   if (typeof window === "undefined" || lifecycleListenersInstalled) return;
   lifecycleListenersInstalled = true;
 
+  const persisted = readPersistedPendingSave();
+  if (persisted) pendingCloudSave = persisted;
+
   window.addEventListener("online", flushPendingCloudSave);
   window.addEventListener("pagehide", flushPendingCloudSave);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") flushPendingCloudSave();
   });
+
+  if (persisted && navigator.onLine) {
+    setTimeout(flushPendingCloudSave, 0);
+  }
 }
 
 function queueCloudSave(data: AppData, updatedAt: string): void {
   installCloudSaveLifecycleListeners();
   pendingCloudSave = { data, updatedAt };
+  persistPendingSave(pendingCloudSave);
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(enqueueLatestCloudSave, CLOUD_SAVE_DEBOUNCE_MS);
 }
@@ -233,6 +280,7 @@ export async function restoreCloudBackup(backupId: string): Promise<AppData> {
   const restoredAt = new Date().toISOString();
   saveLocalData(restored, restoredAt);
   await saveCloudData(restored, restoredAt);
+  clearPersistedPendingSave(restoredAt);
   return restored;
 }
 
