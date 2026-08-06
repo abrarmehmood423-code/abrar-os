@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, limit, orderBy, query, setDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, runTransaction, setDoc } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import type { AppData, Bill, Task } from "./types";
 
@@ -214,16 +214,26 @@ export async function saveCloudData(data: AppData, updatedAt = new Date().toISOS
     throw new Error("Cloud account is unavailable or changed.");
   }
 
+  let cloudWriteApplied = false;
   await withRetry(async () => {
     if (auth?.currentUser?.uid !== ownerUid) throw new Error("Cloud account changed during save.");
-    await setDoc(
-      doc(firestore, "users", ownerUid, "appData", "main"),
-      { ...data, ownerUid, updatedAt },
-      { merge: true }
-    );
+    cloudWriteApplied = await runTransaction(firestore, async (transaction) => {
+      const dataRef = doc(firestore, "users", ownerUid, "appData", "main");
+      const current = await transaction.get(dataRef);
+      const currentUpdatedAt = current.exists()
+        ? (current.data() as { updatedAt?: string }).updatedAt ?? ""
+        : "";
+
+      if (currentUpdatedAt >= updatedAt) return false;
+
+      transaction.set(dataRef, { ...data, ownerUid, updatedAt }, { merge: true });
+      return true;
+    });
   });
 
-  await withRetry(() => createDailyBackup(data, updatedAt, ownerUid));
+  if (cloudWriteApplied) {
+    await withRetry(() => createDailyBackup(data, updatedAt, ownerUid));
+  }
 }
 
 function isNewerSnapshot(candidate: DataSnapshot, existing: DataSnapshot | null): boolean {
@@ -234,7 +244,7 @@ function preserveFailedSave(snapshot: PendingCloudSave): void {
   if (!pendingCloudSave || pendingCloudSave.ownerUid !== snapshot.ownerUid || isNewerSnapshot(snapshot, pendingCloudSave)) {
     pendingCloudSave = snapshot;
   }
-  persistPendingSave(snapshot);
+  if (pendingCloudSave.ownerUid === snapshot.ownerUid) persistPendingSave(pendingCloudSave);
 }
 
 function enqueueLatestCloudSave(): void {
