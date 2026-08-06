@@ -1,8 +1,12 @@
 export const dynamic = "force-static";
 
 const commitSha = process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 12) ?? "local";
-const cacheHeaders = {
-  "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300"
+const responseHeaders = {
+  "Cache-Control": "public, max-age=0, s-maxage=60, stale-while-revalidate=300",
+  "ETag": `"abrar-os-${commitSha}"`,
+  "X-Abrar-OS-Commit": commitSha,
+  "X-Content-Type-Options": "nosniff",
+  "X-Robots-Tag": "noindex, nofollow"
 };
 
 export function GET(): Response {
@@ -13,13 +17,16 @@ export function GET(): Response {
       version: "0.9.0",
       commit: commitSha
     },
-    { headers: cacheHeaders }
+    { headers: responseHeaders }
   );
 }
 
 export function HEAD(): Response {
   return new Response(null, {
     status: 200,
-    headers: cacheHeaders
+    headers: {
+      ...responseHeaders,
+      "Content-Type": "application/json; charset=utf-8"
+    }
   });
 }
