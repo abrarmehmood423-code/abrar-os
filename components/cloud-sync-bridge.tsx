@@ -13,7 +13,9 @@ import {
 } from "@/lib/storage";
 
 const SESSION_SYNC_KEY = "abrar-os-cloud-sync-complete";
+const CLOUD_RETRY_KEY = "abrar-os-cloud-sync-retry-after";
 const CLOUD_READ_ATTEMPTS = 3;
+const CLOUD_READ_RETRY_COOLDOWN_MS = 60_000;
 
 function readSessionFlag(key: string): boolean {
   try {
@@ -36,6 +38,26 @@ function clearSessionFlag(key: string): void {
     window.sessionStorage.removeItem(key);
   } catch {
     // Ignore browsers that block session storage.
+  }
+}
+
+function readRetryAfter(key: string): number {
+  try {
+    const value = Number(window.sessionStorage.getItem(key));
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeRetryAfter(key: string): void {
+  try {
+    window.sessionStorage.setItem(
+      key,
+      String(Date.now() + CLOUD_READ_RETRY_COOLDOWN_MS),
+    );
+  } catch {
+    // A blocked session store must not prevent cloud recovery attempts.
   }
 }
 
@@ -74,7 +96,13 @@ export default function CloudSyncBridge() {
       }
 
       const sessionKey = `${SESSION_SYNC_KEY}:${user.uid}`;
+      const retryKey = `${CLOUD_RETRY_KEY}:${user.uid}`;
       if (readSessionFlag(sessionKey)) {
+        flushPendingCloudSave();
+        return;
+      }
+
+      if (readRetryAfter(retryKey) > Date.now()) {
         flushPendingCloudSave();
         return;
       }
@@ -89,12 +117,14 @@ export default function CloudSyncBridge() {
 
         if (!cloud) {
           // A missing result may also mean a temporary Firestore read failure.
-          // Never mark an inconclusive read as complete, so a later page load can
-          // retry safely instead of suppressing cloud recovery for the session.
+          // Apply a short session cooldown so rapid reloads do not repeat three
+          // inconclusive reads, while a later page load can still recover safely.
+          writeRetryAfter(retryKey);
           flushPendingCloudSave();
           return;
         }
 
+        clearSessionFlag(retryKey);
         const cloudIsNewer = !local.updatedAt || cloud.updatedAt > local.updatedAt;
 
         if (cloudIsNewer) {
@@ -113,6 +143,7 @@ export default function CloudSyncBridge() {
         flushPendingCloudSave();
       } catch (error) {
         console.error("Abrar OS cloud synchronisation failed", error);
+        writeRetryAfter(retryKey);
         flushPendingCloudSave();
       }
     });
