@@ -162,6 +162,33 @@ export default function CloudSyncBridge() {
 
         if (localTime !== null && cloudTime !== null && localTime > cloudTime) {
           await saveCloudData(local.data, local.updatedAt, user.uid);
+          if (!shouldContinue()) return;
+
+          // The Firestore transaction may safely reject this write if another
+          // client updated the cloud document after our first read. Re-read once
+          // before marking sync complete so that a concurrent cloud update is not
+          // hidden for the remainder of this browser session.
+          const confirmedCloud = await loadCloudSnapshot();
+          if (!shouldContinue()) return;
+          if (!confirmedCloud) {
+            writeRetryAfter(retryKey);
+            flushPendingCloudSave();
+            return;
+          }
+
+          const confirmedCloudTime = parseTimestamp(confirmedCloud.updatedAt);
+          if (confirmedCloudTime === null) {
+            writeRetryAfter(retryKey);
+            flushPendingCloudSave();
+            return;
+          }
+
+          if (confirmedCloudTime > localTime) {
+            saveLocalData(confirmedCloud.data, confirmedCloud.updatedAt);
+            writeSessionFlag(sessionKey);
+            window.location.reload();
+            return;
+          }
         } else if (localTime === null || cloudTime === null) {
           // If either side has persisted data but no trustworthy timestamp, its
           // age is unknown. Do not guess and automatically overwrite either side.
