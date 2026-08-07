@@ -9,6 +9,7 @@ import {
   loadLocalSnapshot,
   saveCloudData,
   saveLocalData,
+  starterData,
   type DataSnapshot,
 } from "@/lib/storage";
 
@@ -64,6 +65,12 @@ function writeRetryAfter(key: string): void {
 function clearUserSyncState(uid: string): void {
   clearSessionFlag(`${SESSION_SYNC_KEY}:${uid}`);
   clearSessionFlag(`${CLOUD_RETRY_KEY}:${uid}`);
+}
+
+function parseTimestamp(value: string): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -139,17 +146,28 @@ export default function CloudSyncBridge() {
         }
 
         clearSessionFlag(retryKey);
-        const cloudIsNewer = !local.updatedAt || cloud.updatedAt > local.updatedAt;
+        const localTime = parseTimestamp(local.updatedAt);
+        const cloudTime = parseTimestamp(cloud.updatedAt);
+        const localIsUninitialised = local.data === starterData && !local.updatedAt;
+        const cloudIsNewer =
+          cloudTime !== null && (localTime === null || cloudTime > localTime);
+        const legacyCloudIsOnlyKnownData = localIsUninitialised && cloudTime === null;
 
-        if (cloudIsNewer) {
+        if (cloudIsNewer || legacyCloudIsOnlyKnownData) {
           saveLocalData(cloud.data, cloud.updatedAt || new Date().toISOString());
           writeSessionFlag(sessionKey);
           window.location.reload();
           return;
         }
 
-        if (local.updatedAt > cloud.updatedAt) {
+        if (localTime !== null && cloudTime !== null && localTime > cloudTime) {
           await saveCloudData(local.data, local.updatedAt, user.uid);
+        } else if (localTime === null || cloudTime === null) {
+          // If either side has persisted data but no trustworthy timestamp, its
+          // age is unknown. Do not guess and automatically overwrite either side.
+          writeRetryAfter(retryKey);
+          flushPendingCloudSave();
+          return;
         }
 
         if (!shouldContinue()) return;
