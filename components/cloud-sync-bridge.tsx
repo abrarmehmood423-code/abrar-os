@@ -73,6 +73,14 @@ function parseTimestamp(value: string): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+function dataMatches(left: DataSnapshot["data"], right: DataSnapshot["data"]): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -160,6 +168,20 @@ export default function CloudSyncBridge() {
           return;
         }
 
+        if (
+          localTime !== null &&
+          cloudTime !== null &&
+          localTime === cloudTime &&
+          !dataMatches(local.data, cloud.data)
+        ) {
+          // Equal timestamps with different payloads are ambiguous. This can
+          // happen if two clients save within the same millisecond. Never pick a
+          // winner automatically: keep both copies untouched and retry later.
+          writeRetryAfter(retryKey);
+          flushPendingCloudSave();
+          return;
+        }
+
         if (localTime !== null && cloudTime !== null && localTime > cloudTime) {
           await saveCloudData(local.data, local.updatedAt, user.uid);
           if (!shouldContinue()) return;
@@ -187,6 +209,15 @@ export default function CloudSyncBridge() {
             saveLocalData(confirmedCloud.data, confirmedCloud.updatedAt);
             writeSessionFlag(sessionKey);
             window.location.reload();
+            return;
+          }
+
+          if (
+            confirmedCloudTime === localTime &&
+            !dataMatches(local.data, confirmedCloud.data)
+          ) {
+            writeRetryAfter(retryKey);
+            flushPendingCloudSave();
             return;
           }
         } else if (localTime === null || cloudTime === null) {
