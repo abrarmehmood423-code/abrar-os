@@ -61,6 +61,11 @@ function writeRetryAfter(key: string): void {
   }
 }
 
+function clearUserSyncState(uid: string): void {
+  clearSessionFlag(`${SESSION_SYNC_KEY}:${uid}`);
+  clearSessionFlag(`${CLOUD_RETRY_KEY}:${uid}`);
+}
+
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
@@ -88,12 +93,21 @@ export default function CloudSyncBridge() {
     if (!authInstance) return;
 
     let cancelled = false;
+    let previousUid = authInstance.currentUser?.uid ?? null;
 
     const unsubscribe = onAuthStateChanged(authInstance, async (user) => {
-      if (cancelled || !user) {
-        if (!user) clearSessionFlag(SESSION_SYNC_KEY);
+      if (cancelled) return;
+
+      if (!user) {
+        if (previousUid) clearUserSyncState(previousUid);
+        previousUid = null;
         return;
       }
+
+      if (previousUid && previousUid !== user.uid) {
+        clearUserSyncState(previousUid);
+      }
+      previousUid = user.uid;
 
       const sessionKey = `${SESSION_SYNC_KEY}:${user.uid}`;
       const retryKey = `${CLOUD_RETRY_KEY}:${user.uid}`;
