@@ -73,9 +73,21 @@ function parseTimestamp(value: string): number | null {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
+function canonicalise(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalise);
+  if (!value || typeof value !== "object") return value;
+
+  const source = value as Record<string, unknown>;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) {
+    sorted[key] = canonicalise(source[key]);
+  }
+  return sorted;
+}
+
 function dataMatches(left: DataSnapshot["data"], right: DataSnapshot["data"]): boolean {
   try {
-    return JSON.stringify(left) === JSON.stringify(right);
+    return JSON.stringify(canonicalise(left)) === JSON.stringify(canonicalise(right));
   } catch {
     return false;
   }
