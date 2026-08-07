@@ -89,9 +89,8 @@ export default function CloudSyncBridge() {
 
         if (!cloud) {
           // A missing result may also mean a temporary Firestore read failure.
-          // Confirm it with bounded retries and never auto-seed here, because an
-          // inconclusive read must not allow local data to replace cloud data.
-          writeSessionFlag(sessionKey);
+          // Never mark an inconclusive read as complete, so a later page load can
+          // retry safely instead of suppressing cloud recovery for the session.
           flushPendingCloudSave();
           return;
         }
